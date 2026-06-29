@@ -100,7 +100,8 @@ engine = SqlglotEngine()
 
 print(f"Supported source dialects: {engine.supported_dialects}\n")
 print(f"Repo root:         {REPO_ROOT}")
-print(f"Input folder:      {input_root}  ({len(list(input_root.iterdir()))} files)")
+_n_src = len(list(input_root.rglob("*.sql")) + list(input_root.rglob("*.dtsx")))
+print(f"Input folder:      {input_root}  ({_n_src} .sql/.dtsx files, incl. subfolders)")
 print(f"T-SQL output:      {output_root}")
 print(f"SSIS output:       {ssis_output}")
 
@@ -207,8 +208,10 @@ if not fn_df.empty:
     fn_df['call_count'] = pd.to_numeric(fn_df['call_count'], errors='coerce').fillna(0).astype(int)
     fn_df['platform'] = 'MS SQL Server'
 # ── standalone .sql files → append as MS SQL Server entries ──────────────────────
+# rglob recurses into subfolders, matching bladespector (which also traverses them),
+# so you can organise the input folder/Volume into subfolders.
 sql_file_rows = []
-for f in sorted(input_root.glob("*.sql")):
+for f in sorted(input_root.rglob("*.sql")):
     name = f.name
     cat = ("HIGH" if any(k in name.lower() for k in ["sp_", "upsert"])
            else "MEDIUM" if any(k in name.lower() for k in ["extract", "incremental", "load"])
@@ -252,7 +255,7 @@ to_uc(sql_df, 'sql_statements')
 # DBTITLE 1,Phase 2a — SQL Analysis and Conversion
 conversion_rows, converted_code = [], {}
 
-for path in sorted(input_root.glob("*.sql")):
+for path in sorted(input_root.rglob("*.sql")):   # rglob → also picks up subfolders
     src    = path.read_text(encoding="utf-8")
     result = await engine.transpile(
         source_dialect="tsql", target_dialect="databricks",
@@ -375,7 +378,7 @@ import pandas as pd
 from pathlib import Path
 from databricks.labs.bladebridge.transpiler import Transpiler
 
-dtsx_files = sorted(input_root.glob("*.dtsx"))
+dtsx_files = sorted(input_root.rglob("*.dtsx"))   # rglob → also picks up subfolders
 print("Phase 2b — SSIS Conversion (BladeBridge)")
 print("=" * 80)
 bb_version = __import__("importlib.metadata", fromlist=["metadata"]).metadata("databricks-bb-plugin")["Version"]
