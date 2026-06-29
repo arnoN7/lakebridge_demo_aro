@@ -1,0 +1,20 @@
+# Generated conversion outputs — never commit these
+_output/
+
+# Legacy demo folder (pre-Git structure)
+lakebridge_demo_assets/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Jupyter / Databricks
+.ipynb_checkpoints/
+.databricks/
+
+# Declarative Automation Bundles — generated parameterized dashboard (not the source template)
+dist/
+
+# DAB local workspace overrides
+databricks.yml.local

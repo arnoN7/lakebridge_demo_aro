@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<DTS:Executable xmlns:DTS="www.microsoft.com/SqlServer/Dts"
+  DTS:ObjectName="ETL_Finance_Sync">
+  <DTS:Executables>
+    <DTS:Executable DTS:ObjectName="Load Daily Ledger"
+      DTS:ExecutableType="Microsoft.Pipeline">
+      <DTS:ObjectData>
+        <pipeline>
+          <components>
+            <component componentClassID="Microsoft.OLEDBSource" name="Finance Source">
+              <properties>
+                <property name="SqlCommand">SELECT TOP 2000 LedgerDate, AccountNumber, CostCenter, ISNULL(Amount, 0) AS Amount FROM dbo.DailyLedger WITH (NOLOCK) WHERE LedgerDate &gt;= DATEADD(DAY, -2, GETDATE())</property>
+              </properties>
+            </component>
+          </components>
+        </pipeline>
+      </DTS:ObjectData>
+    </DTS:Executable>
+    <DTS:Executable DTS:ObjectName="Close Finance Batch"
+      DTS:ExecutableType="Microsoft.ExecuteSQLTask">
+      <DTS:ObjectData>
+        <SqlTaskData>
+          <SqlStatement>EXEC dbo.usp_CloseFinanceBatch @BatchDate = GETDATE()</SqlStatement>
+        </SqlTaskData>
+      </DTS:ObjectData>
+    </DTS:Executable>
+  </DTS:Executables>
+</DTS:Executable>

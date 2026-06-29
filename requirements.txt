@@ -1,0 +1,3 @@
+databricks-labs-lakebridge
+databricks-bb-plugin
+openpyxl

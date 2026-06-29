@@ -1,0 +1,1097 @@
+{
+  "datasets": [
+    {
+      "name": "effort_hypothesis",
+      "displayName": "Effort Hypothesis",
+      "queryLines": [
+        "SELECT\n",
+        "  object_type AS `Object Type`,\n",
+        "  complexity_level AS `Complexity`,\n",
+        "  transpilability_status AS `Status`,\n",
+        "  profile AS `Profile`,\n",
+        "  effort_md_per_unit AS `MD / Unit`,\n",
+        "  notes AS `Notes`,\n",
+        "  1 AS sort_key\n",
+        "FROM\n",
+        "  classic_stable_pr2ip7.lakebridge_assessment.effort_hypothesis\n",
+        "UNION ALL\n",
+        "SELECT\n",
+        "  '\u2014 Overhead' AS `Object Type`,\n",
+        "  profile AS `Complexity`,\n",
+        "  NULL AS `Status`,\n",
+        "  profile AS `Profile`,\n",
+        "  rate AS `MD / Unit`,\n",
+        "  CONCAT(CAST(CAST(rate * 100 AS INT) AS STRING), '% of dev total \u2014 ', notes) AS `Notes`,\n",
+        "  2 AS sort_key\n",
+        "FROM\n",
+        "  classic_stable_pr2ip7.lakebridge_assessment.overhead_hypothesis\n",
+        "ORDER BY\n",
+        "  sort_key,\n",
+        "  `Object Type`,\n",
+        "  `Complexity`,\n",
+        "  `Status`"
+      ]
+    },
+    {
+      "name": "effort_estimate",
+      "displayName": "Effort Estimate",
+      "queryLines": [
+        "SELECT * FROM classic_stable_pr2ip7.lakebridge_assessment.effort_metrics"
+      ]
+    },
+    {
+      "name": "migration_summary",
+      "displayName": "Migration Summary",
+      "queryLines": [
+        "SELECT * FROM classic_stable_pr2ip7.lakebridge_assessment.assessment_metrics"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "b8e54d97",
+      "displayName": "Overview",
+      "layout": [
+        {
+          "widget": {
+            "name": "title",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Lakebridge Migration Assessment\n",
+                "Powered by Databricks Labs Lakebridge \u00b7 bladespector analyzer"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "bar_complexity",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "migration_summary",
+                  "fields": [
+                    {
+                      "name": "Complexity",
+                      "expression": "`Complexity`"
+                    },
+                    {
+                      "name": "measure(Total Files)",
+                      "expression": "MEASURE(`Total Files`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Files by Complexity",
+                "showTitle": true
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "Complexity",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "measure(Total Files)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 4,
+            "width": 6,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "bar_platform",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "migration_summary",
+                  "fields": [
+                    {
+                      "name": "Transpiled",
+                      "expression": "`Transpiled`"
+                    },
+                    {
+                      "name": "Platform",
+                      "expression": "`Platform`"
+                    },
+                    {
+                      "name": "measure(Total Files)",
+                      "expression": "MEASURE(`Total Files`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Files by Platform",
+                "showTitle": true
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "Platform",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "measure(Total Files)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "Transpiled",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 4,
+            "width": 6,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "table_file_details",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "migration_summary",
+                  "fields": [
+                    {
+                      "name": "File Name",
+                      "expression": "`File Name`"
+                    },
+                    {
+                      "name": "Platform",
+                      "expression": "`Platform`"
+                    },
+                    {
+                      "name": "Complexity",
+                      "expression": "`Complexity`"
+                    },
+                    {
+                      "name": "Engine",
+                      "expression": "`Engine`"
+                    },
+                    {
+                      "name": "Model",
+                      "expression": "`Model`"
+                    },
+                    {
+                      "name": "Transpiled",
+                      "expression": "`Transpiled`"
+                    },
+                    {
+                      "name": "Failure Reason",
+                      "expression": "`Failure Reason`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "title": "File Inventory",
+                "showTitle": true
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "File Name"
+                  },
+                  {
+                    "fieldName": "Platform"
+                  },
+                  {
+                    "fieldName": "Complexity"
+                  },
+                  {
+                    "fieldName": "Engine"
+                  },
+                  {
+                    "fieldName": "Model"
+                  },
+                  {
+                    "fieldName": "Transpiled"
+                  },
+                  {
+                    "fieldName": "Failure Reason"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 8,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "counter_total_files",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "migration_summary",
+                  "fields": [
+                    {
+                      "name": "measure(Total Files)",
+                      "expression": "MEASURE(`Total Files`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Total Files",
+                "showTitle": true
+              },
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(Total Files)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "counter_high_complexity",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "migration_summary",
+                  "fields": [
+                    {
+                      "name": "measure(High Complexity Files)",
+                      "expression": "MEASURE(`High Complexity Files`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "High Complexity",
+                "showTitle": true
+              },
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(High Complexity Files)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 2,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "counter_low_complexity",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "migration_summary",
+                  "fields": [
+                    {
+                      "name": "measure(Low Complexity Files)",
+                      "expression": "MEASURE(`Low Complexity Files`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Low Complexity",
+                "showTitle": true
+              },
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(Low Complexity Files)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 2,
+            "width": 4,
+            "height": 2
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "migration_cost_estimate",
+      "displayName": "Migration Cost Estimate",
+      "layout": [
+        {
+          "widget": {
+            "name": "title",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Migration Cost Estimate\n",
+                "_Effort rates are configurable \u2014 edit the **Effort Hypothesis** table at the bottom of this page and re-run the notebook cell to update all figures._"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "counter_total_md",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "effort_estimate",
+                  "fields": [
+                    {
+                      "name": "measure(Effort (MD))",
+                      "expression": "MEASURE(`Effort (MD)`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "title": "Total MD",
+                "showTitle": true
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(Effort (MD))",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 1
+                    }
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "counter_senior_de",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "effort_estimate",
+                  "fields": [
+                    {
+                      "name": "measure(Effort (MD))",
+                      "expression": "MEASURE(`Effort (MD)`)"
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "expression": "`profile` IN ('Senior Data Engineer')"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "title": "Senior Data Engineer",
+                "showTitle": true
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(Effort (MD))",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 1
+                    }
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 2,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "counter_etl",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "effort_estimate",
+                  "fields": [
+                    {
+                      "name": "measure(Effort (MD))",
+                      "expression": "MEASURE(`Effort (MD)`)"
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "expression": "`profile` IN ('ETL Specialist')"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "title": "ETL Specialist",
+                "showTitle": true
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(Effort (MD))",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 1
+                    }
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 2,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "pie_effort_profile",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "effort_estimate",
+                  "fields": [
+                    {
+                      "name": "measure(Effort (MD))",
+                      "expression": "MEASURE(`Effort (MD)`)"
+                    },
+                    {
+                      "name": "profile",
+                      "expression": "`profile`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "title": "Effort by Profile",
+                "showTitle": true
+              },
+              "version": 3,
+              "widgetType": "pie",
+              "encodings": {
+                "angle": {
+                  "fieldName": "measure(Effort (MD))",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "profile",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 3,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "bar_effort_type",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "effort_estimate",
+                  "fields": [
+                    {
+                      "name": "transpilability_status",
+                      "expression": "`transpilability_status`"
+                    },
+                    {
+                      "name": "object_type",
+                      "expression": "`object_type`"
+                    },
+                    {
+                      "name": "measure(Effort (MD))",
+                      "expression": "MEASURE(`Effort (MD)`)"
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "expression": "`object_type` NOT IN ('\u2014 Overhead')"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "title": "Effort by Object Type",
+                "showTitle": true
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "object_type",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "measure(Effort (MD))",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "transpilability_status",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 5,
+            "width": 3,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "table_planning",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "effort_estimate",
+                  "fields": [
+                    {
+                      "name": "object_name",
+                      "expression": "`object_name`"
+                    },
+                    {
+                      "name": "object_type",
+                      "expression": "`object_type`"
+                    },
+                    {
+                      "name": "complexity_level",
+                      "expression": "`complexity_level`"
+                    },
+                    {
+                      "name": "transpilability_status",
+                      "expression": "`transpilability_status`"
+                    },
+                    {
+                      "name": "profile",
+                      "expression": "`profile`"
+                    },
+                    {
+                      "name": "measure(Effort (MD))",
+                      "expression": "MEASURE(`Effort (MD)`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "title": "Planning Detail",
+                "showTitle": true
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "object_name"
+                  },
+                  {
+                    "fieldName": "object_type"
+                  },
+                  {
+                    "fieldName": "complexity_level"
+                  },
+                  {
+                    "fieldName": "transpilability_status"
+                  },
+                  {
+                    "fieldName": "profile"
+                  },
+                  {
+                    "fieldName": "measure(Effort (MD))"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 10,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "table_hypothesis",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "effort_hypothesis",
+                  "fields": [
+                    {
+                      "name": "Object Type",
+                      "expression": "`Object Type`"
+                    },
+                    {
+                      "name": "Complexity",
+                      "expression": "`Complexity`"
+                    },
+                    {
+                      "name": "Status",
+                      "expression": "`Status`"
+                    },
+                    {
+                      "name": "Profile",
+                      "expression": "`Profile`"
+                    },
+                    {
+                      "name": "MD / Unit",
+                      "expression": "`MD / Unit`"
+                    },
+                    {
+                      "name": "Notes",
+                      "expression": "`Notes`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "title": "Effort Hypothesis",
+                "showTitle": true,
+                "description": "Edit rates in the notebook cell 'Effort Hypothesis \u2014 seed Delta tables' and re-run to update.",
+                "showDescription": true
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "Object Type"
+                  },
+                  {
+                    "fieldName": "Complexity"
+                  },
+                  {
+                    "fieldName": "Status"
+                  },
+                  {
+                    "fieldName": "Profile"
+                  },
+                  {
+                    "fieldName": "MD / Unit"
+                  },
+                  {
+                    "fieldName": "Notes"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 16,
+            "width": 6,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "bar_transpilability",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "migration_summary",
+                  "fields": [
+                    {
+                      "name": "Platform",
+                      "expression": "`Platform`"
+                    },
+                    {
+                      "name": "measure(Transpilability Rate)",
+                      "expression": "MEASURE(`Transpilability Rate`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "title": "Transpilability by Platform",
+                "showTitle": true
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "Platform",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "measure(Transpilability Rate)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 20,
+            "width": 4,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "counter_transpilability",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "migration_summary",
+                  "fields": [
+                    {
+                      "name": "measure(Transpilability Rate)",
+                      "expression": "MEASURE(`Transpilability Rate`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "title": "Transpilability Rate",
+                "showTitle": true
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(Transpilability Rate)",
+                  "formatTemplate": "{{ @formatted }}%",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 1
+                    }
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 20,
+            "width": 4,
+            "height": 4
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "complexity_definitions",
+      "displayName": "Complexity Definitions",
+      "layout": [
+        {
+          "widget": {
+            "name": "title",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# Complexity Definitions\n",
+                "## Bladespector Assessment Rules\n",
+                "\n",
+                "Bladespector (Lakebridge's analyzer) categorizes source files into LOW / MEDIUM / HIGH complexity based on technology-specific heuristics. These are **analytic transpilability** indicators \u2014 they measure migration effort, NOT whether the LLM transpiler (Switch) can handle them."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "tsql_section",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## T-SQL (MS SQL Server)\n",
+                "\n",
+                "Complexity is derived from the **file purpose** (naming convention):\n",
+                "\n",
+                "| Complexity | Rule | Examples |\n",
+                "|---|---|---|\n",
+                "| **HIGH** | Stored procedures (`sp_`), upsert patterns | `sp_load_customer_metrics.sql`, `sp_upsert_inventory.sql` |\n",
+                "| **MEDIUM** | ETL patterns: extract, incremental load | `incremental_extract.sql` |\n",
+                "| **LOW** | Simple DDL, schema definitions, basic queries | `schema_sales.sql` |\n",
+                "\n",
+                "Transpiler: `sqlglot` (deterministic, no LLM). All T-SQL files are transpilable."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 12,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "ssis_section",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## SSIS Packages\n",
+                "\n",
+                "Complexity is derived from **number of nodes** (tasks + components) in the .dtsx package:\n",
+                "\n",
+                "| Complexity | Nodes | Example |\n",
+                "|---|---|---|\n",
+                "| **HIGH** | 20+ nodes | `10_ssis_data_quality_checks.dtsx` (21 nodes) |\n",
+                "| **MEDIUM** | 10\u201319 nodes | `07_ssis_order_enrichment.dtsx` (14 nodes) |\n",
+                "| **LOW** | < 10 nodes | `05_ssis_customer_load.dtsx` (4 nodes) |\n",
+                "\n",
+                "Transpiler: `switch` (LLM-powered, Foundation Model: `databricks-claude-opus-4-8`). Switch can attempt any component regardless of bladespector's `supported` flag."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 8,
+            "width": 12,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "ssis_analytic",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## SSIS Analytic Transpilability (bladespector `supported` flag)\n",
+                "\n",
+                "The `transformations.supported` column reflects whether bladespector's **rule-based engine** can categorize a component \u2014 NOT whether Switch can convert it.\n",
+                "\n",
+                "**Supported (16 types):** ExecuteSQLTask, Pipeline, OLEDBSource, OLEDBDestination, Lookup, DerivedColumn, ConditionalSplit, Sort, MergeJoin, UnionAll, Aggregate, Multicast, RowCount, OLEDBCommand, DataConvert, FlatFileDestination\n",
+                "\n",
+                "**Not analytically supported (5 types):** SendMailTask, ScriptComponent, ForEachLoop, SequenceContainer, RowSampling\n",
+                "\n",
+                "> These \"unsupported\" flags are informational only. Switch (LLM) can transpile all of them \u2014 e.g., SendMailTask \u2192 Python notification step, ForEachLoop \u2192 Databricks foreach/map, SequenceContainer \u2192 task group."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 13,
+            "width": 12,
+            "height": 5
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}

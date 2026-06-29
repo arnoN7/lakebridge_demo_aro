@@ -1,0 +1,297 @@
+<?xml version="1.0"?>
+<DTS:Executable xmlns:DTS="www.microsoft.com/SqlServer/Dts"
+  DTS:ObjectName="ETL_Product_SCD_Type2"
+  DTS:Description="Slowly Changing Dimension Type 2 for Product dimension using Sort, Merge Join, Conditional Split, and OLE DB Command for historical tracking"
+  DTS:CreatorName="DOMAIN\dw_developer"
+  DTS:DTSID="{C3D4E5F6-A7B8-9012-CDEF-345678901234}">
+
+  <!-- CONNECTION MANAGERS -->
+  <DTS:ConnectionManagers>
+    <DTS:ConnectionManager DTS:ObjectName="SourceERP"
+      DTS:DTSID="{88888888-8888-8888-8888-888888888881}"
+      DTS:CreationName="OLEDB">
+      <DTS:ObjectData>
+        <DTS:ConnectionManager ConnectionString="Data Source=ERPPROD01;Initial Catalog=ERP_Products;Provider=SQLNCLI11.1;Integrated Security=SSPI;"/>
+      </DTS:ObjectData>
+    </DTS:ConnectionManager>
+    <DTS:ConnectionManager DTS:ObjectName="DW_Products"
+      DTS:DTSID="{88888888-8888-8888-8888-888888888882}"
+      DTS:CreationName="OLEDB">
+      <DTS:ObjectData>
+        <DTS:ConnectionManager ConnectionString="Data Source=SQLDW01;Initial Catalog=DataWarehouse;Provider=SQLNCLI11.1;Integrated Security=SSPI;"/>
+      </DTS:ObjectData>
+    </DTS:ConnectionManager>
+  </DTS:ConnectionManagers>
+
+  <!-- VARIABLES -->
+  <DTS:Variables>
+    <DTS:Variable DTS:ObjectName="SCD_EffectiveDate" DTS:DataType="7" DTS:Namespace="User"
+      DTS:Expression="(DT_DBTIMESTAMP)(DT_DBDATE)GETDATE()"/>
+    <DTS:Variable DTS:ObjectName="NewRecords" DTS:DataType="3" DTS:Namespace="User">0</DTS:Variable>
+    <DTS:Variable DTS:ObjectName="UpdatedRecords" DTS:DataType="3" DTS:Namespace="User">0</DTS:Variable>
+    <DTS:Variable DTS:ObjectName="UnchangedRecords" DTS:DataType="3" DTS:Namespace="User">0</DTS:Variable>
+    <DTS:Variable DTS:ObjectName="ExpiredRecords" DTS:DataType="3" DTS:Namespace="User">0</DTS:Variable>
+  </DTS:Variables>
+
+  <!-- CONTROL FLOW -->
+  <DTS:Executables>
+
+    <!-- Task 1: Create staging temp table -->
+    <DTS:Executable DTS:ObjectName="SQL - Create SCD Staging"
+      DTS:ExecutableType="Microsoft.ExecuteSQLTask">
+      <DTS:ObjectData>
+        <SqlTaskData ConnectionName="DW_Products">
+          <SqlStatement>
+            IF OBJECT_ID('tempdb..#Product_SCD_Stage') IS NOT NULL DROP TABLE #Product_SCD_Stage;
+            CREATE TABLE #Product_SCD_Stage (
+              ProductKey INT, ProductID NVARCHAR(50), ProductName NVARCHAR(200),
+              Category NVARCHAR(100), SubCategory NVARCHAR(100), Brand NVARCHAR(100),
+              UnitPrice DECIMAL(18,4), Weight DECIMAL(10,3), Color NVARCHAR(50),
+              SCD_Action NVARCHAR(20)
+            )
+          </SqlStatement>
+        </SqlTaskData>
+      </DTS:ObjectData>
+    </DTS:Executable>
+
+    <!-- Task 2: SCD Type 2 Data Flow -->
+    <DTS:Executable DTS:ObjectName="DFT - SCD Type 2 Product Dimension"
+      DTS:ExecutableType="Microsoft.Pipeline">
+      <DTS:ObjectData>
+        <pipeline>
+          <components>
+
+            <!-- SOURCE 1: Current products from ERP -->
+            <component componentClassID="Microsoft.OLEDBSource" name="SRC - ERP Products (Current)">
+              <properties>
+                <property name="SqlCommand">
+                  SELECT
+                    p.ProductID,
+                    p.ProductName,
+                    c.CategoryName AS Category,
+                    sc.SubCategoryName AS SubCategory,
+                    b.BrandName AS Brand,
+                    p.UnitPrice,
+                    p.Weight,
+                    p.Color,
+                    HASHBYTES('SHA2_256',
+                      CONCAT(p.ProductName, '|', c.CategoryName, '|', sc.SubCategoryName, '|',
+                             b.BrandName, '|', CAST(p.UnitPrice AS VARCHAR), '|',
+                             CAST(p.Weight AS VARCHAR), '|', p.Color)
+                    ) AS SourceHashKey
+                  FROM dbo.Product p
+                  INNER JOIN dbo.Category c ON p.CategoryID = c.CategoryID
+                  INNER JOIN dbo.SubCategory sc ON p.SubCategoryID = sc.SubCategoryID
+                  LEFT JOIN dbo.Brand b ON p.BrandID = b.BrandID
+                  WHERE p.IsActive = 1
+                  ORDER BY p.ProductID
+                </property>
+              </properties>
+            </component>
+
+            <!-- SOURCE 2: Existing dimension (current records only) -->
+            <component componentClassID="Microsoft.OLEDBSource" name="SRC - DW dim_product (Active)">
+              <properties>
+                <property name="SqlCommand">
+                  SELECT
+                    ProductKey, ProductID, ProductName, Category, SubCategory,
+                    Brand, UnitPrice, Weight, Color,
+                    HASHBYTES('SHA2_256',
+                      CONCAT(ProductName, '|', Category, '|', SubCategory, '|',
+                             Brand, '|', CAST(UnitPrice AS VARCHAR), '|',
+                             CAST(Weight AS VARCHAR), '|', Color)
+                    ) AS DimHashKey
+                  FROM dw.dim_product
+                  WHERE IsCurrent = 1 AND EffectiveTo = '9999-12-31'
+                  ORDER BY ProductID
+                </property>
+              </properties>
+            </component>
+
+            <!-- SORT: Both inputs must be sorted for Merge Join -->
+            <component componentClassID="Microsoft.Sort" name="SORT - Source Products">
+              <properties>
+                <property name="SortColumns">ProductID ASC</property>
+                <property name="EliminateDuplicates">true</property>
+              </properties>
+            </component>
+
+            <component componentClassID="Microsoft.Sort" name="SORT - Dim Products">
+              <properties>
+                <property name="SortColumns">ProductID ASC</property>
+              </properties>
+            </component>
+
+            <!-- MERGE JOIN: Full Outer to detect INSERTs, UPDATEs, and DELETEs -->
+            <component componentClassID="Microsoft.MergeJoin" name="MJ - Compare Source vs Dim">
+              <properties>
+                <property name="JoinType">FullJoin</property>
+                <property name="NumKeyColumns">1</property>
+                <property name="TreatNullsAsEqual">false</property>
+              </properties>
+              <inputs>
+                <input name="Left Input" description="Source (ERP)">
+                  <inputColumns>
+                    <inputColumn cachedName="ProductID"/>
+                    <inputColumn cachedName="SourceHashKey"/>
+                  </inputColumns>
+                </input>
+                <input name="Right Input" description="Dimension (DW)">
+                  <inputColumns>
+                    <inputColumn cachedName="ProductKey"/>
+                    <inputColumn cachedName="DimHashKey"/>
+                  </inputColumns>
+                </input>
+              </inputs>
+            </component>
+
+            <!-- CONDITIONAL SPLIT: Determine SCD action -->
+            <component componentClassID="Microsoft.ConditionalSplit" name="CSPL - Determine SCD Action">
+              <outputs>
+                <output name="New Record" expression="ISNULL(ProductKey)"/>
+                <output name="Changed Record (Type 2)" expression="!ISNULL(ProductKey) AND SourceHashKey != DimHashKey"/>
+                <output name="Deleted from Source" expression="ISNULL(src_ProductID) AND !ISNULL(ProductKey)"/>
+                <output name="Unchanged" description="Hash matches - no action needed"/>
+              </outputs>
+            </component>
+
+            <!-- DERIVED COLUMN: Add SCD metadata -->
+            <component componentClassID="Microsoft.DerivedColumn" name="DER - Add SCD2 Metadata (New)">
+              <properties>
+                <property name="DerivedColumns">
+                  <derivedColumn name="EffectiveFrom" expression="@[User::SCD_EffectiveDate]" dataType="DT_DBTIMESTAMP"/>
+                  <derivedColumn name="EffectiveTo" expression="(DT_DBTIMESTAMP)&quot;9999-12-31&quot;" dataType="DT_DBTIMESTAMP"/>
+                  <derivedColumn name="IsCurrent" expression="TRUE" dataType="DT_BOOL"/>
+                  <derivedColumn name="RecordSource" expression="&quot;ERP&quot;" dataType="DT_WSTR" length="10"/>
+                  <derivedColumn name="LoadTimestamp" expression="GETDATE()" dataType="DT_DBTIMESTAMP"/>
+                </property>
+              </properties>
+            </component>
+
+            <!-- OLE DB COMMAND: Expire old dimension record (Type 2 update) -->
+            <component componentClassID="Microsoft.OLEDBCommand" name="CMD - Expire Previous Version">
+              <properties>
+                <property name="SqlCommand">
+                  EXEC dw.usp_ExpireDimProduct @ProductKey = ?, @EffectiveTo = ?
+                </property>
+                <property name="ParameterMapping">ProductKey:Input:0:DB_I4;@[User::SCD_EffectiveDate]:Input:1:DB_DBTIMESTAMP</property>
+              </properties>
+            </component>
+
+            <!-- UNION ALL: Combine new + changed (both get inserted as new current rows) -->
+            <component componentClassID="Microsoft.UnionAll" name="UA - Combine New and Changed">
+              <inputs>
+                <input name="New Records"/>
+                <input name="Changed Records (new version)"/>
+              </inputs>
+            </component>
+
+            <!-- ROW COUNT: Track metrics -->
+            <component componentClassID="Microsoft.RowCount" name="RC - Count New Inserts">
+              <properties>
+                <property name="VariableName">User::NewRecords</property>
+              </properties>
+            </component>
+
+            <!-- DESTINATION: Insert new/updated dimension rows -->
+            <component componentClassID="Microsoft.OLEDBDestination" name="DST - dim_product (Insert New Versions)">
+              <properties>
+                <property name="OpenRowset">[dw].[dim_product]</property>
+                <property name="FastLoadOptions">TABLOCK,CHECK_CONSTRAINTS</property>
+                <property name="AccessMode">3</property>
+              </properties>
+            </component>
+
+            <!-- DESTINATION: Soft-delete records removed from source -->
+            <component componentClassID="Microsoft.OLEDBCommand" name="CMD - Soft Delete Removed Products">
+              <properties>
+                <property name="SqlCommand">
+                  EXEC dw.usp_SoftDeleteProduct @ProductKey = ?, @DeletedDate = ?
+                </property>
+                <property name="ParameterMapping">ProductKey:Input:0:DB_I4;@[User::SCD_EffectiveDate]:Input:1:DB_DBTIMESTAMP</property>
+              </properties>
+            </component>
+
+          </components>
+
+          <!-- DATA FLOW PATHS -->
+          <paths>
+            <path startId="SRC - ERP Products (Current).Output" endId="SORT - Source Products.Input"/>
+            <path startId="SRC - DW dim_product (Active).Output" endId="SORT - Dim Products.Input"/>
+            <path startId="SORT - Source Products.Output" endId="MJ - Compare Source vs Dim.Left Input"/>
+            <path startId="SORT - Dim Products.Output" endId="MJ - Compare Source vs Dim.Right Input"/>
+            <path startId="MJ - Compare Source vs Dim.Output" endId="CSPL - Determine SCD Action.Input"/>
+            <path startId="CSPL - Determine SCD Action.New Record" endId="DER - Add SCD2 Metadata (New).Input"/>
+            <path startId="CSPL - Determine SCD Action.Changed Record (Type 2)" endId="CMD - Expire Previous Version.Input"/>
+            <path startId="CMD - Expire Previous Version.Output" endId="DER - Add SCD2 Metadata (New).Input"/>
+            <path startId="CSPL - Determine SCD Action.Deleted from Source" endId="CMD - Soft Delete Removed Products.Input"/>
+            <path startId="DER - Add SCD2 Metadata (New).Output" endId="UA - Combine New and Changed.Input"/>
+            <path startId="UA - Combine New and Changed.Output" endId="RC - Count New Inserts.Input"/>
+            <path startId="RC - Count New Inserts.Output" endId="DST - dim_product (Insert New Versions).Input"/>
+          </paths>
+        </pipeline>
+      </DTS:ObjectData>
+    </DTS:Executable>
+
+    <!-- Task 3: Rebuild indexes -->
+    <DTS:Executable DTS:ObjectName="SQL - Rebuild Dimension Indexes"
+      DTS:ExecutableType="Microsoft.ExecuteSQLTask">
+      <DTS:ObjectData>
+        <SqlTaskData ConnectionName="DW_Products">
+          <SqlStatement>
+            ALTER INDEX ALL ON dw.dim_product REBUILD WITH (ONLINE = ON, FILLFACTOR = 90);
+            EXEC sp_updatestats;
+          </SqlStatement>
+        </SqlTaskData>
+      </DTS:ObjectData>
+    </DTS:Executable>
+
+    <!-- Task 4: Log SCD run -->
+    <DTS:Executable DTS:ObjectName="SQL - Log SCD Results"
+      DTS:ExecutableType="Microsoft.ExecuteSQLTask">
+      <DTS:ObjectData>
+        <SqlTaskData ConnectionName="DW_Products">
+          <SqlStatement>
+            EXEC audit.usp_LogSCDRun
+              @DimensionTable = 'dim_product',
+              @NewRecords = ?,
+              @UpdatedRecords = ?,
+              @UnchangedRecords = ?,
+              @ExpiredRecords = ?,
+              @RunDate = ?
+          </SqlStatement>
+          <ParameterBinding VariableName="User::NewRecords" Direction="Input" DataType="DB_I4" ParameterName="0"/>
+          <ParameterBinding VariableName="User::UpdatedRecords" Direction="Input" DataType="DB_I4" ParameterName="1"/>
+          <ParameterBinding VariableName="User::UnchangedRecords" Direction="Input" DataType="DB_I4" ParameterName="2"/>
+          <ParameterBinding VariableName="User::ExpiredRecords" Direction="Input" DataType="DB_I4" ParameterName="3"/>
+          <ParameterBinding VariableName="User::SCD_EffectiveDate" Direction="Input" DataType="DB_DBTIMESTAMP" ParameterName="4"/>
+        </SqlTaskData>
+      </DTS:ObjectData>
+    </DTS:Executable>
+
+  </DTS:Executables>
+
+  <!-- PRECEDENCE CONSTRAINTS -->
+  <DTS:PrecedenceConstraints>
+    <DTS:PrecedenceConstraint DTS:From="SQL - Create SCD Staging" DTS:To="DFT - SCD Type 2 Product Dimension" DTS:Value="Success"/>
+    <DTS:PrecedenceConstraint DTS:From="DFT - SCD Type 2 Product Dimension" DTS:To="SQL - Rebuild Dimension Indexes" DTS:Value="Success"/>
+    <DTS:PrecedenceConstraint DTS:From="SQL - Rebuild Dimension Indexes" DTS:To="SQL - Log SCD Results" DTS:Value="Completion"/>
+  </DTS:PrecedenceConstraints>
+
+  <!-- EVENT HANDLERS -->
+  <DTS:EventHandlers>
+    <DTS:EventHandler DTS:EventName="OnError">
+      <DTS:Executables>
+        <DTS:Executable DTS:ObjectName="Send SCD Error Alert"
+          DTS:ExecutableType="Microsoft.SendMailTask">
+          <DTS:ObjectData>
+            <SendMailTask ToLine="dw-alerts@company.com"
+              Subject="SCD Type 2 FAILURE: dim_product"
+              MessageSource="dim_product SCD2 failed. Check ETL logs for details."/>
+          </DTS:ObjectData>
+        </DTS:Executable>
+      </DTS:Executables>
+    </DTS:EventHandler>
+  </DTS:EventHandlers>
+
+</DTS:Executable>
