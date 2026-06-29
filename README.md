@@ -13,7 +13,7 @@ A folder-driven migration analysis and conversion project using [Databricks Labs
 1. **Clone this repo as a Git folder** in the Databricks workspace (Workspace → Create → Git folder).
 2. **Deploy the bundle** with the Databricks CLI: `./deploy.sh` (creates the setup job + the dashboard).
 3. **Run the guided notebook** (or the `lakebridge_setup` job) to assess and convert your own
-   T-SQL and SSIS — drop your files into `sample_assets/` or point `input_root` at a Volume.
+   T-SQL and SSIS — drop your files into a Volume and set `input_path` in `databricks.yml`.
 
 The conversion (assessment, T-SQL via SqlglotEngine, full SSIS packages via BladeBridge) all
 happens on the cluster.
@@ -28,9 +28,8 @@ lakebridge_demo/
 ├── requirements.txt                  ← Python dependencies
 ├── .gitignore
 ├── scripts/
-│   └── build_dashboard.py            ← Parameterizes .lvdash.json for target catalog
-├── config/
-│   └── paths.py                      ← Centralised path configuration
+│   ├── build_dashboard.py            ← Parameterizes .lvdash.json for target catalog
+│   └── generate_sample_ssis.py      ← Regenerates the SSIS sample packages
 ├── sample_assets/                    ← Version-controlled demo assets
 │   ├── 01_schema_sales.sql           ← T-SQL DDL
 │   ├── 02_incremental_extract.sql    ← T-SQL query
@@ -116,7 +115,9 @@ native Linux binary. Assessment, T-SQL conversion, and the metric views also run
 
 In demo mode the notebook reads from `sample_assets/` (version-controlled fake assets).
 
-To switch to a real client delivery, edit `config/paths.py` and point `input_root` to the actual client drop folder, then re-run the analysis and conversion cells.
+To switch to a real client delivery, set the `input_path` variable in `databricks.yml` to the
+Volume/folder holding the client's `.sql` / `.dtsx` files (e.g. `/Volumes/<catalog>/<schema>/landing`),
+re-deploy, and run the job. Leave it blank to use the bundled `sample_assets/`.
 
 ## Dependencies
 

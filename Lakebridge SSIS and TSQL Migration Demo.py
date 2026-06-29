@@ -53,16 +53,18 @@ dbutils.library.restartPython()
 # MAGIC > **Compute note:** Phase 2b's BladeBridge binary is a native Linux executable, so run this
 # MAGIC > notebook on a **classic job cluster** (the bundled DAB job already uses one). The rest runs on Serverless too.
 # MAGIC
-# MAGIC To switch to a real client delivery, change `input_root` in the **Setup** cell.
+# MAGIC To analyse real code instead of the samples, set the `input_path` variable in
+# MAGIC **databricks.yml** to the folder/Volume holding the client's `.sql` / `.dtsx` files.
 
 # COMMAND ----------
 
 # DBTITLE 1,Setup — paths and engine
 # -- Job / bundle parameters --------------------------------------------------
-# Defaults match the dev catalog/schema.
-# Override via: databricks bundle run --param catalog=X --param schema=Y
+# These are driven by the bundle variables in databricks.yml (catalog, schema,
+# input_path) and passed in as job parameters. Edit them in databricks.yml — not here.
 dbutils.widgets.text("catalog", "classic_stable_pr2ip7", "UC Catalog")
 dbutils.widgets.text("schema",  "lakebridge_assessment",  "UC Schema")
+dbutils.widgets.text("input_path", "", "Input path (blank = bundled sample_assets)")
 UC_CAT    = dbutils.widgets.get("catalog")
 UC_SCHEMA = dbutils.widgets.get("schema")
 
@@ -82,10 +84,13 @@ try:
 except Exception:
     REPO_ROOT = Path.cwd()
 
-# DEMO MODE  : reads from version-controlled sample assets
-# REAL CLIENT: replace with the actual client drop folder, e.g.
-#   input_root = Path("/Volumes/my_catalog/my_schema/client_delivery")
-input_root  = REPO_ROOT / "sample_assets"
+# Input source:
+#   • input_path (from databricks.yml) set  → real client delivery, e.g. a UC Volume
+#       /Volumes/<catalog>/<schema>/landing  that the client drops .sql / .dtsx into
+#   • input_path blank                       → the version-controlled sample_assets/
+_input_path = dbutils.widgets.get("input_path").strip()
+input_root  = Path(_input_path) if _input_path else (REPO_ROOT / "sample_assets")
+
 output_root = REPO_ROOT / "_output" / "converted"   # T-SQL conversions (Phase 2a)
 ssis_output = REPO_ROOT / "_output" / "ssis_sdp"     # SSIS conversions  (Phase 2b, BladeBridge)
 output_root.mkdir(parents=True, exist_ok=True)
@@ -518,13 +523,17 @@ if ssis_rows:
 # MAGIC %md
 # MAGIC ## How to adapt for a real delivery
 # MAGIC
-# MAGIC Switch from demo to real assets with a single-line change in the **Setup** cell:
+# MAGIC Point the demo at real code by setting the `input_path` variable in **databricks.yml**
+# MAGIC (no notebook edits needed):
 # MAGIC
-# MAGIC ```python
-# MAGIC input_root = Path("/Volumes/my_catalog/my_schema/client_delivery")
+# MAGIC ```yaml
+# MAGIC variables:
+# MAGIC   input_path:
+# MAGIC     default: "/Volumes/my_catalog/my_schema/landing"   # client drops .sql / .dtsx here
 # MAGIC ```
 # MAGIC
-# MAGIC Then re-run all cells. The pipeline is idempotent — tables are upserted, not recreated.
+# MAGIC Re-deploy the bundle and run the job (or set the **input_path** widget for an interactive
+# MAGIC run). The pipeline is idempotent — tables are upserted, not recreated.
 # MAGIC
 # MAGIC ---
 # MAGIC
