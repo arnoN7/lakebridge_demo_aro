@@ -54,7 +54,7 @@ dbutils.library.restartPython()
 # MAGIC > notebook on a **classic job cluster** (the bundled DAB job already uses one). The rest runs on Serverless too.
 # MAGIC
 # MAGIC To analyse real code instead of the samples, set the `input_path` variable in
-# MAGIC **databricks.yml** to the folder/Volume holding the client's `.sql` / `.dtsx` files.
+# MAGIC **databricks.yml** to the folder/Volume holding your `.sql` / `.dtsx` files.
 
 # COMMAND ----------
 
@@ -85,8 +85,8 @@ except Exception:
     REPO_ROOT = Path.cwd()
 
 # Input source:
-#   • input_path (from databricks.yml) set  → real client delivery, e.g. a UC Volume
-#       /Volumes/<catalog>/<schema>/landing  that the client drops .sql / .dtsx into
+#   • input_path (from databricks.yml) set  → real code, e.g. a UC Volume
+#       /Volumes/<catalog>/<schema>/landing  that you drop .sql / .dtsx into
 #   • input_path blank                       → the version-controlled sample_assets/
 _input_path = dbutils.widgets.get("input_path").strip()
 input_root  = Path(_input_path) if _input_path else (REPO_ROOT / "sample_assets")
@@ -519,9 +519,9 @@ if ssis_rows:
 
 # COMMAND ----------
 
-# DBTITLE 1,How to adapt for a real client delivery
+# DBTITLE 1,How to adapt for your own code
 # MAGIC %md
-# MAGIC ## How to adapt for a real delivery
+# MAGIC ## How to adapt for your own code
 # MAGIC
 # MAGIC Point the demo at real code by setting the `input_path` variable in **databricks.yml**
 # MAGIC (no notebook edits needed):
@@ -529,7 +529,7 @@ if ssis_rows:
 # MAGIC ```yaml
 # MAGIC variables:
 # MAGIC   input_path:
-# MAGIC     default: "/Volumes/my_catalog/my_schema/landing"   # client drops .sql / .dtsx here
+# MAGIC     default: "/Volumes/my_catalog/my_schema/landing"   # drop .sql / .dtsx here
 # MAGIC ```
 # MAGIC
 # MAGIC Re-deploy the bundle and run the job (or set the **input_path** widget for an interactive

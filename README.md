@@ -8,7 +8,7 @@ A folder-driven migration analysis and conversion project using [Databricks Labs
 > binaries on your laptop, so this works under security policies that block local installs.
 > The only thing you run locally is the standard Databricks CLI, to deploy the bundle.
 
-## How a client uses this
+## How to use it
 
 1. **Clone this repo as a Git folder** in the Databricks workspace (Workspace → Create → Git folder).
 2. **Deploy the bundle** with the Databricks CLI: `./deploy.sh` (creates the setup job + the dashboard).
@@ -115,8 +115,8 @@ native Linux binary. Assessment, T-SQL conversion, and the metric views also run
 
 In demo mode the notebook reads from `sample_assets/` (version-controlled fake assets).
 
-To switch to a real client delivery, set the `input_path` variable in `databricks.yml` to the
-Volume/folder holding the client's `.sql` / `.dtsx` files (e.g. `/Volumes/<catalog>/<schema>/landing`),
+To analyse real code, set the `input_path` variable in `databricks.yml` to the
+Volume/folder holding your `.sql` / `.dtsx` files (e.g. `/Volumes/<catalog>/<schema>/landing`),
 re-deploy, and run the job. Leave it blank to use the bundled `sample_assets/`.
 
 ## Dependencies

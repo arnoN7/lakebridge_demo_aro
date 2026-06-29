@@ -13,7 +13,7 @@ variables:
   input_path:
     description: >-
       Folder holding the source files to analyse (.sql, .dtsx) — e.g. a UC Volume the
-      client drops code into: /Volumes/<catalog>/<schema>/landing. Leave blank to use
+      you drop code into: /Volumes/<catalog>/<schema>/landing. Leave blank to use
       the version-controlled sample_assets/ shipped with this repo.
     default: ""
   warehouse_id:
