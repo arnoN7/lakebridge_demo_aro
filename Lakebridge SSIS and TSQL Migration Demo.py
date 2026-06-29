@@ -33,7 +33,7 @@ dbutils.library.restartPython()
 # MAGIC **Pipeline:**
 # MAGIC 1. **Assessment** — `bladespector` scans the input folder → Excel reports → UC tables (`job_details`, `transformations`, `functions`, `sql_statements`)
 # MAGIC 2. **T-SQL Conversion** (Phase 2a) — `SqlglotEngine` transpiles `.sql` files deterministically → `conversion_results`
-# MAGIC 3. **SSIS Conversion** (Phase 2b) — the **BladeBridge** transpiler (`databricks-bb-plugin`) converts each `.dtsx` package to a Databricks notebook → `conversion_results`. BladeBridge translates **Execute SQL Tasks** (and package variables); **Data Flow** components (Lookup, Derived Column, Merge Join, Aggregate, …) and unsupported control tasks are **not** auto-converted — those packages are flagged `transpiled = false` with the list of components that need manual rewrite or the LLM transpiler (Switch)
+# MAGIC 3. **SSIS Conversion** (Phase 2b) — the **BladeBridge** transpiler (`databricks-bb-plugin`) converts each `.dtsx` package to a Databricks notebook → `conversion_results`. It translates **Execute SQL Tasks** and **Data Flow** pipelines (OLE DB Source → transforms → OLE DB Destination) into chained Spark SQL temp views + `INSERT … SELECT`. Tasks the [Lakebridge docs](https://databrickslabs.github.io/lakebridge/docs/transpile/source_systems/ssis/supported_components/) list as **unsupported** (Send Mail, FTP, Web Service, Message Queue, XML, WMI, Bulk Insert, Data Profiling, Export/Import Column) are detected and the package is flagged `transpiled = false` for manual review. **Note:** conversion requires well-formed SSIS XML — packages must be real SSDT exports, not simplified XML
 # MAGIC 4. **Metric Views** (Phase 3) — create two Unity Catalog metric views (`assessment_metrics`, `effort_metrics`) that back the **Lakebridge Migration Assessment** dashboard
 # MAGIC
 # MAGIC **Data model** (all in `{catalog}.{schema}`, default `classic_stable_pr2ip7.lakebridge_assessment`):
@@ -347,10 +347,12 @@ print(converted_code[first])
 # using a native `dbxconv` binary that ships INSIDE the databricks-bb-plugin wheel —
 # installed in cell 1, runs in THIS cluster, nothing installed locally.
 #
-# SCOPE: BladeBridge translates Execute SQL Tasks (and package variables). It does NOT
-# emit Data Flow components (Lookup, Derived Column, Merge Join, Aggregate, …) or some
-# control tasks (Script, ForEach, Send Mail). We detect those from the .dtsx and flag
-# the package transpiled=false so the dashboard reports an honest transpilability rate.
+# SCOPE: BladeBridge converts Execute SQL Tasks and Data Flow pipelines (OLE DB Source,
+# OLE DB Destination, derived expressions, …) into chained Spark SQL temp views + INSERTs.
+# Tasks the Lakebridge docs list as unsupported (Send Mail, FTP, Web Service, XML, …) are
+# detected via UNSUPPORTED_TYPES below. We flag a package transpiled=false when it contains
+# one of those, emits no Spark SQL, or the converter raises a diagnostic — so the dashboard
+# reports an honest transpilability rate. (Requires well-formed SSDT XML.)
 # No license key is required — the binary runs as-is. (The Transpiler computes a
 # converter_key.txt path in __init__ but never passes it to the binary; gating on
 # that file's existence is what made an earlier version of this cell refuse to run.)
@@ -405,53 +407,57 @@ def write_mime_outputs(blob: str, dest_dir: Path, default_stem: str) -> list:
     return written
 
 
-ssis_results = []
-def dropped_components(xml_text: str) -> list:
-    """Components BladeBridge does NOT emit: it converts Execute SQL Tasks (and the
-    data-flow container) but not Data Flow components (Lookup, Derived Column, Merge
-    Join, Aggregate, …) nor unsupported control tasks (Script, ForEach, Send Mail, …).
-    Returns the distinct dropped component types so we can flag partial conversions
-    honestly instead of reporting everything as transpiled."""
-    comp_ids   = re.findall(r'componentClassID="([^"]+)"', xml_text)   # data-flow components
-    exec_types = re.findall(r'ExecutableType="([^"]+)"', xml_text)     # control-flow tasks
-    # Package = the root container, Pipeline = the data-flow container, ExecuteSQLTask =
-    # what BladeBridge actually converts. Everything else (data-flow components + other
-    # control tasks) is not emitted.
-    not_dropped = {"Microsoft.ExecuteSQLTask", "Microsoft.Pipeline", "Microsoft.Package"}
-    dropped = set(comp_ids) | (set(exec_types) - not_dropped)
-    return sorted(t.replace("Microsoft.", "") for t in dropped)
+# Tasks/components the Lakebridge SSIS converter lists as UNSUPPORTED — "require manual
+# conversion". Source: the official supported-components doc
+# https://databrickslabs.github.io/lakebridge/docs/transpile/source_systems/ssis/supported_components/
+# (Loops, Sequence Container and Script Task ARE supported, so they are NOT listed here.)
+# When present, the rest of the package still converts; we flag it for manual review.
+UNSUPPORTED_TYPES = {
+    # Control flow tasks
+    "Microsoft.SendMailTask", "Microsoft.FtpTask", "Microsoft.MessageQueueTask",
+    "Microsoft.WebServiceTask", "Microsoft.WmiDataReaderTask", "Microsoft.WmiEventWatcherTask",
+    "Microsoft.XMLTask", "Microsoft.BulkInsertTask", "Microsoft.ExecuteDDLTask",
+    "Microsoft.AnalysisServicesProcessingTask", "Microsoft.DataProfilingTask",
+    # Data flow components
+    "Microsoft.ExportColumn", "Microsoft.ImportColumn",
+}
+
+def unsupported_components(xml_text: str) -> list:
+    found = re.findall(r'(?:componentClassID|ExecutableType)="([^"]+)"', xml_text)
+    return sorted({t.replace("Microsoft.", "") for t in found if t in UNSUPPORTED_TYPES})
 
 ssis_results = []
 for dtsx_path in dtsx_files:
     source_code = dtsx_path.read_text(encoding="utf-8")
     edits, diagnostics = await transpiler.transpile(dtsx_path.name, source_code)
-    # On success transpile() returns (edits, []); on failure ([], [diagnostic]).
+    # On success transpile() returns (edits, []); a crash/parse failure → ([], [diagnostic]).
     out_files = write_mime_outputs(edits[0].new_text, ssis_output, dtsx_path.stem) if edits else []
-    # Count what was actually emitted vs what BladeBridge could not translate.
-    sql_cells = sum(f.read_text(encoding="utf-8").count("spark.sql(") for f in out_files)
-    dropped   = dropped_components(source_code)
-    # A package is "fully transpiled" only if nothing was dropped and the binary
-    # raised no diagnostics. Data-flow-heavy packages → partial (needs manual / LLM).
-    fully = bool(out_files) and not diagnostics and not dropped
-    reasons = [str(d.message) for d in diagnostics]
-    if dropped:
-        reasons.append("Data Flow / unsupported components not auto-converted by "
-                       "BladeBridge: " + ", ".join(dropped) + " — needs manual rewrite "
-                       "or the LLM transpiler (Switch)")
-    scope = ("Full package (SQL tasks)" if fully
-             else f"Partial — {sql_cells} SQL task(s) converted, {len(dropped)} "
-                  f"data-flow/other component type(s) not converted")
+    # Honest flag: transpiled only if Spark SQL was emitted, the converter raised no
+    # diagnostic, AND the package contains no component type BladeBridge can't handle.
+    sql_cells   = sum(f.read_text(encoding="utf-8").count("spark.sql(") for f in out_files)
+    unsupported = unsupported_components(source_code)
+    transpiled  = bool(out_files) and not diagnostics and sql_cells > 0 and not unsupported
+    reasons = [str(d.message).splitlines()[0][:200] for d in diagnostics]
+    if unsupported:
+        reasons.append("Components requiring manual rewrite (not converted): "
+                       + ", ".join(unsupported))
+    if not transpiled and not reasons:
+        reasons.append("No Spark SQL emitted — review manually")
+    scope = (f"Converted — {sql_cells} Spark SQL cell(s)" if transpiled
+             else f"Partial — {sql_cells} cell(s) converted; manual review required"
+                  if sql_cells else "Not converted — manual review required")
     for f in out_files:
-        print(f"  OK  {dtsx_path.name} -> {f.name} ({f.stat().st_size:,} bytes, "
-              f"{sql_cells} SQL cells)" + (f"  ⚠ dropped: {', '.join(dropped)}" if dropped else ""))
+        print(f"  {'OK  ' if transpiled else 'WARN'} {dtsx_path.name} -> {f.name} "
+              f"({f.stat().st_size:,} bytes, {sql_cells} SQL cells)"
+              + (f"  ⚠ unsupported: {', '.join(unsupported)}" if unsupported else ""))
     for d in diagnostics:
-        print(f"  ERR {dtsx_path.name}: [{d.severity}] {str(d.message)[:160]}")
+        print(f"  ERR {dtsx_path.name}: {str(d.message).splitlines()[0][:160]}")
     ssis_results.append({
         "file_name": dtsx_path.name,
-        "transpiled": fully,
+        "transpiled": transpiled,
         "output_files": ", ".join(f.name for f in out_files) or None,
         "sql_cells_converted": sql_cells,
-        "components_dropped": len(dropped),
+        "diagnostics": len(diagnostics),
         "transpilation_scope": scope,
         "failure_reason": "; ".join(reasons) or None,
     })
@@ -469,7 +475,7 @@ ssis_rows = [{
     "engine":              "bladebridge",
     "model":               None,
     "success_count":       r["sql_cells_converted"],
-    "error_count":         r["components_dropped"],
+    "error_count":         r["diagnostics"],
     "transpiled":          bool(r["transpiled"]),
     "failure_reason":      r["failure_reason"],
     "transpilation_scope": r["transpilation_scope"],

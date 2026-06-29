@@ -1,27 +1,17 @@
 <?xml version="1.0"?>
-<DTS:Executable xmlns:DTS="www.microsoft.com/SqlServer/Dts"
-  DTS:ObjectName="ETL_Finance_Sync">
+<DTS:Executable xmlns:DTS="www.microsoft.com/SqlServer/Dts" DTS:refId="Package" DTS:ExecutableType="Microsoft.Package" DTS:ObjectName="ETL_Finance_Sync">
   <DTS:Executables>
-    <DTS:Executable DTS:ObjectName="Load Daily Ledger"
-      DTS:ExecutableType="Microsoft.Pipeline">
+    <DTS:Executable DTS:refId="Package\Truncate Stage" DTS:ExecutableType="Microsoft.ExecuteSQLTask" DTS:ObjectName="Truncate Stage">
       <DTS:ObjectData>
-        <pipeline>
-          <components>
-            <component componentClassID="Microsoft.OLEDBSource" name="Finance Source">
-              <properties>
-                <property name="SqlCommand">SELECT TOP 2000 LedgerDate, AccountNumber, CostCenter, ISNULL(Amount, 0) AS Amount FROM dbo.DailyLedger WITH (NOLOCK) WHERE LedgerDate &gt;= DATEADD(DAY, -2, GETDATE())</property>
-              </properties>
-            </component>
-          </components>
-        </pipeline>
+        <SQLTask:SqlTaskData SQLTask:SqlStatementSource="TRUNCATE TABLE staging.finance;" xmlns:SQLTask="www.microsoft.com/sqlserver/dts/tasks/sqltask" />
       </DTS:ObjectData>
     </DTS:Executable>
-    <DTS:Executable DTS:ObjectName="Close Finance Batch"
-      DTS:ExecutableType="Microsoft.ExecuteSQLTask">
+    <DTS:Executable DTS:refId="Package\DFT Finance" DTS:ExecutableType="Microsoft.Pipeline" DTS:ObjectName="DFT Finance">
+      <DTS:ObjectData><pipeline><components><component refId="Package\DFT Finance\Src GL" name="OLE DB Source" componentClassID="Microsoft.OLEDBSource"><properties><property name="AccessMode">2</property><property name="SqlCommand">SELECT a.AccountCode, a.AccountName, t.Amount, t.PostingDate FROM fin.GLTransaction t JOIN fin.Account a ON a.AccountID = t.AccountID WHERE t.PostingDate &gt;= DATEADD(DAY, -1, GETDATE())</property></properties><outputs><output refId="Package\DFT Finance\Src GL.Outputs[out]" name="OLE DB Source Output"><outputColumns><outputColumn refId="Package\DFT Finance\Src GL.Outputs[out].Columns[AccountCode]" name="AccountCode"/><outputColumn refId="Package\DFT Finance\Src GL.Outputs[out].Columns[AccountName]" name="AccountName"/><outputColumn refId="Package\DFT Finance\Src GL.Outputs[out].Columns[Amount]" name="Amount"/><outputColumn refId="Package\DFT Finance\Src GL.Outputs[out].Columns[PostingDate]" name="PostingDate"/></outputColumns></output></outputs></component><component refId="Package\DFT Finance\Dst stage" name="OLE DB Destination" componentClassID="Microsoft.OLEDBDestination"><properties><property name="OpenRowset">[staging].[finance]</property></properties><inputs><input refId="Package\DFT Finance\Dst stage.Inputs[in]" name="OLE DB Destination Input"><inputColumns/></input></inputs></component></components><paths><path refId="Package\DFT Finance.Paths[src2dst]" name="src2dst" startId="Package\DFT Finance\Src GL.Outputs[out]" endId="Package\DFT Finance\Dst stage.Inputs[in]"/></paths></pipeline></DTS:ObjectData>
+    </DTS:Executable>
+    <DTS:Executable DTS:refId="Package\Merge To Fact" DTS:ExecutableType="Microsoft.ExecuteSQLTask" DTS:ObjectName="Merge To Fact">
       <DTS:ObjectData>
-        <SqlTaskData>
-          <SqlStatement>EXEC dbo.usp_CloseFinanceBatch @BatchDate = GETDATE()</SqlStatement>
-        </SqlTaskData>
+        <SQLTask:SqlTaskData SQLTask:SqlStatementSource="MERGE INTO dw.fact_finance t USING staging.finance s ON t.AccountCode = s.AccountCode AND t.PostingDate = s.PostingDate WHEN MATCHED THEN UPDATE SET t.Amount = s.Amount WHEN NOT MATCHED THEN INSERT (AccountCode, AccountName, Amount, PostingDate) VALUES (s.AccountCode, s.AccountName, s.Amount, s.PostingDate);" xmlns:SQLTask="www.microsoft.com/sqlserver/dts/tasks/sqltask" />
       </DTS:ObjectData>
     </DTS:Executable>
   </DTS:Executables>

@@ -1,32 +1,12 @@
 <?xml version="1.0"?>
-<DTS:Executable xmlns:DTS="www.microsoft.com/SqlServer/Dts"
-  DTS:ObjectName="ETL_Load_Customer_Dim">
+<DTS:Executable xmlns:DTS="www.microsoft.com/SqlServer/Dts" DTS:refId="Package" DTS:ExecutableType="Microsoft.Package" DTS:ObjectName="ETL_Load_Customer_Dim">
   <DTS:Executables>
-    <DTS:Executable DTS:ObjectName="Extract Customers from Source"
-      DTS:ExecutableType="Microsoft.Pipeline">
-      <DTS:ObjectData>
-        <pipeline>
-          <components>
-            <component componentClassID="Microsoft.OLEDBSource" name="OLE DB Source">
-              <properties>
-                <property name="SqlCommand">SELECT TOP 1000 CustomerID, FirstName, LastName, ISNULL(Email, 'N/A') AS Email, CONVERT(VARCHAR, CreatedDate, 120) AS CreatedDate FROM dbo.Customer WHERE IsActive = 1 AND CreatedDate >= DATEADD(MONTH, -3, GETDATE())</property>
-              </properties>
-            </component>
-            <component componentClassID="Microsoft.OLEDBDestination" name="Load dim_customer">
-              <properties>
-                <property name="OpenRowset">[dw].[dim_customer]</property>
-              </properties>
-            </component>
-          </components>
-        </pipeline>
-      </DTS:ObjectData>
+    <DTS:Executable DTS:refId="Package\DFT Customer" DTS:ExecutableType="Microsoft.Pipeline" DTS:ObjectName="DFT Customer">
+      <DTS:ObjectData><pipeline><components><component refId="Package\DFT Customer\Src Customers" name="OLE DB Source" componentClassID="Microsoft.OLEDBSource"><properties><property name="AccessMode">2</property><property name="SqlCommand">SELECT CustomerID, FirstName + ' ' + LastName AS FullName, ISNULL(Email,'N/A') AS Email, CONVERT(VARCHAR, CreatedDate, 120) AS CreatedDate FROM dbo.Customer WHERE IsActive = 1 AND CreatedDate &gt;= DATEADD(MONTH, -3, GETDATE())</property></properties><outputs><output refId="Package\DFT Customer\Src Customers.Outputs[out]" name="OLE DB Source Output"><outputColumns><outputColumn refId="Package\DFT Customer\Src Customers.Outputs[out].Columns[CustomerID]" name="CustomerID"/><outputColumn refId="Package\DFT Customer\Src Customers.Outputs[out].Columns[FullName]" name="FullName"/><outputColumn refId="Package\DFT Customer\Src Customers.Outputs[out].Columns[Email]" name="Email"/><outputColumn refId="Package\DFT Customer\Src Customers.Outputs[out].Columns[CreatedDate]" name="CreatedDate"/></outputColumns></output></outputs></component><component refId="Package\DFT Customer\Dst dim_customer" name="OLE DB Destination" componentClassID="Microsoft.OLEDBDestination"><properties><property name="OpenRowset">[dw].[dim_customer]</property></properties><inputs><input refId="Package\DFT Customer\Dst dim_customer.Inputs[in]" name="OLE DB Destination Input"><inputColumns/></input></inputs></component></components><paths><path refId="Package\DFT Customer.Paths[src2dst]" name="src2dst" startId="Package\DFT Customer\Src Customers.Outputs[out]" endId="Package\DFT Customer\Dst dim_customer.Inputs[in]"/></paths></pipeline></DTS:ObjectData>
     </DTS:Executable>
-    <DTS:Executable DTS:ObjectName="Refresh Customer Metrics"
-      DTS:ExecutableType="Microsoft.ExecuteSQLTask">
+    <DTS:Executable DTS:refId="Package\Refresh Customer Metrics" DTS:ExecutableType="Microsoft.ExecuteSQLTask" DTS:ObjectName="Refresh Customer Metrics">
       <DTS:ObjectData>
-        <SqlTaskData>
-          <SqlStatement>UPDATE dbo.CustomerMetrics SET LastOrderDate = (SELECT MAX(OrderDate) FROM dbo.SalesOrderHeader o WHERE o.CustomerID = CustomerMetrics.CustomerID), TotalSpend = (SELECT ISNULL(SUM(TotalDue), 0) FROM dbo.SalesOrderHeader o WHERE o.CustomerID = CustomerMetrics.CustomerID) WHERE EXISTS (SELECT 1 FROM dbo.SalesOrderHeader o WHERE o.CustomerID = CustomerMetrics.CustomerID AND o.OrderDate &gt;= DATEADD(DAY, -1, GETDATE()))</SqlStatement>
-        </SqlTaskData>
+        <SQLTask:SqlTaskData SQLTask:SqlStatementSource="UPDATE m SET m.LastOrderDate = o.MaxDate, m.TotalSpend = o.Total FROM dbo.CustomerMetrics m JOIN (SELECT CustomerID, MAX(OrderDate) MaxDate, SUM(TotalDue) Total FROM dbo.SalesOrderHeader GROUP BY CustomerID) o ON o.CustomerID = m.CustomerID;" xmlns:SQLTask="www.microsoft.com/sqlserver/dts/tasks/sqltask" />
       </DTS:ObjectData>
     </DTS:Executable>
   </DTS:Executables>
