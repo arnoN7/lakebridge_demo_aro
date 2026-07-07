@@ -123,7 +123,7 @@
                       "expression": "`Complexity`"
                     },
                     {
-                      "name": "measure(Total Files)",
+                      "name": "countdistinct(File Name)",
                       "expression": "COUNT(DISTINCT `File Name`)"
                     }
                   ],
@@ -146,10 +146,13 @@
                   }
                 },
                 "y": {
-                  "fieldName": "measure(Total Files)",
+                  "fieldName": "countdistinct(File Name)",
                   "scale": {
                     "type": "quantitative"
                   }
+                },
+                "label": {
+                  "show": true
                 }
               },
               "data": {
@@ -159,7 +162,7 @@
           },
           "position": {
             "x": 0,
-            "y": 4,
+            "y": 2,
             "width": 6,
             "height": 4
           }
@@ -182,7 +185,7 @@
                       "expression": "`Platform`"
                     },
                     {
-                      "name": "measure(Total Files)",
+                      "name": "countdistinct(File Name)",
                       "expression": "COUNT(DISTINCT `File Name`)"
                     }
                   ],
@@ -205,7 +208,7 @@
                   }
                 },
                 "y": {
-                  "fieldName": "measure(Total Files)",
+                  "fieldName": "countdistinct(File Name)",
                   "scale": {
                     "type": "quantitative"
                   }
@@ -215,6 +218,9 @@
                   "scale": {
                     "type": "categorical"
                   }
+                },
+                "label": {
+                  "show": true
                 }
               },
               "data": {
@@ -224,7 +230,7 @@
           },
           "position": {
             "x": 6,
-            "y": 4,
+            "y": 2,
             "width": 6,
             "height": 4
           }
@@ -310,135 +316,9 @@
           },
           "position": {
             "x": 0,
-            "y": 8,
+            "y": 6,
             "width": 12,
             "height": 6
-          }
-        },
-        {
-          "widget": {
-            "name": "counter_total_files",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "migration_summary",
-                  "fields": [
-                    {
-                      "name": "measure(Total Files)",
-                      "expression": "COUNT(DISTINCT `File Name`)"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 2,
-              "frame": {
-                "title": "Total Files",
-                "showTitle": true
-              },
-              "widgetType": "counter",
-              "encodings": {
-                "value": {
-                  "fieldName": "measure(Total Files)"
-                }
-              },
-              "data": {
-                "queryName": "main_query"
-              }
-            }
-          },
-          "position": {
-            "x": 0,
-            "y": 2,
-            "width": 4,
-            "height": 2
-          }
-        },
-        {
-          "widget": {
-            "name": "counter_high_complexity",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "migration_summary",
-                  "fields": [
-                    {
-                      "name": "measure(High Complexity Files)",
-                      "expression": "COUNT(DISTINCT CASE WHEN `Complexity` = 'HIGH' THEN `File Name` END)"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 2,
-              "frame": {
-                "title": "High Complexity",
-                "showTitle": true
-              },
-              "widgetType": "counter",
-              "encodings": {
-                "value": {
-                  "fieldName": "measure(High Complexity Files)"
-                }
-              },
-              "data": {
-                "queryName": "main_query"
-              }
-            }
-          },
-          "position": {
-            "x": 4,
-            "y": 2,
-            "width": 4,
-            "height": 2
-          }
-        },
-        {
-          "widget": {
-            "name": "counter_low_complexity",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "migration_summary",
-                  "fields": [
-                    {
-                      "name": "measure(Low Complexity Files)",
-                      "expression": "COUNT(DISTINCT CASE WHEN `Complexity` = 'LOW' THEN `File Name` END)"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 2,
-              "frame": {
-                "title": "Low Complexity",
-                "showTitle": true
-              },
-              "widgetType": "counter",
-              "encodings": {
-                "value": {
-                  "fieldName": "measure(Low Complexity Files)"
-                }
-              },
-              "data": {
-                "queryName": "main_query"
-              }
-            }
-          },
-          "position": {
-            "x": 8,
-            "y": 2,
-            "width": 4,
-            "height": 2
           }
         }
       ],
