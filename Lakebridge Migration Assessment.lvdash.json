@@ -16,12 +16,12 @@
         "  classic_stable_pr2ip7.lakebridge_assessment.effort_hypothesis\n",
         "UNION ALL\n",
         "SELECT\n",
-        "  '\u2014 Overhead' AS `Object Type`,\n",
+        "  '— Overhead' AS `Object Type`,\n",
         "  profile AS `Complexity`,\n",
         "  NULL AS `Status`,\n",
         "  profile AS `Profile`,\n",
         "  rate AS `MD / Unit`,\n",
-        "  CONCAT(CAST(CAST(rate * 100 AS INT) AS STRING), '% of dev total \u2014 ', notes) AS `Notes`,\n",
+        "  CONCAT(CAST(CAST(rate * 100 AS INT) AS STRING), '% of dev total — ', notes) AS `Notes`,\n",
         "  2 AS sort_key\n",
         "FROM\n",
         "  classic_stable_pr2ip7.lakebridge_assessment.overhead_hypothesis\n",
@@ -36,14 +36,54 @@
       "name": "effort_estimate",
       "displayName": "Effort Estimate",
       "queryLines": [
-        "SELECT * FROM classic_stable_pr2ip7.lakebridge_assessment.effort_metrics"
+        "WITH file_effort AS (\n",
+        "  SELECT\n",
+        "    j.file_name AS object_name,\n",
+        "    CASE WHEN j.platform = 'SSIS' THEN 'SSIS Component' ELSE 'SQL Statement' END AS object_type,\n",
+        "    CASE WHEN j.platform = 'SSIS'\n",
+        "         THEN CASE WHEN j.categorization = 'HIGH' THEN 'Transformation' ELSE 'Orchestration' END\n",
+        "         ELSE j.categorization END AS complexity_level,\n",
+        "    CASE WHEN c.transpiled THEN 'transpilable' ELSE 'not_transpilable' END AS transpilability_status,\n",
+        "    j.platform, c.engine, c.model\n",
+        "  FROM classic_stable_pr2ip7.lakebridge_assessment.job_details j\n",
+        "  LEFT JOIN classic_stable_pr2ip7.lakebridge_assessment.conversion_results c ON j.file_name = c.file_name\n",
+        "),\n",
+        "with_effort AS (\n",
+        "  SELECT f.object_name, f.object_type, f.complexity_level, f.transpilability_status,\n",
+        "         f.platform, f.engine, f.model, h.profile, h.effort_md_per_unit AS effort_md\n",
+        "  FROM file_effort f\n",
+        "  JOIN classic_stable_pr2ip7.lakebridge_assessment.effort_hypothesis h\n",
+        "    ON h.object_type = f.object_type AND h.complexity_level = f.complexity_level\n",
+        "   AND h.transpilability_status = f.transpilability_status\n",
+        "),\n",
+        "dev_total AS (SELECT SUM(effort_md) AS total FROM with_effort),\n",
+        "overhead AS (\n",
+        "  SELECT '— Overhead' AS object_name, '— Overhead' AS object_type, o.profile AS complexity_level,\n",
+        "         NULL AS transpilability_status, NULL AS platform, NULL AS engine, NULL AS model,\n",
+        "         o.profile, ROUND(d.total * o.rate, 2) AS effort_md\n",
+        "  FROM classic_stable_pr2ip7.lakebridge_assessment.overhead_hypothesis o CROSS JOIN dev_total d\n",
+        ")\n",
+        "SELECT * FROM with_effort UNION ALL SELECT * FROM overhead"
       ]
     },
     {
       "name": "migration_summary",
       "displayName": "Migration Summary",
       "queryLines": [
-        "SELECT * FROM classic_stable_pr2ip7.lakebridge_assessment.assessment_metrics"
+        "SELECT\n",
+        "  j.platform AS `Platform`,\n",
+        "  j.file_name AS `File Name`,\n",
+        "  j.job_type AS `Job Type`,\n",
+        "  j.categorization AS `Complexity`,\n",
+        "  j.included AS `Included`,\n",
+        "  j.number_of_nodes AS `number_of_nodes`,\n",
+        "  c.engine AS `Engine`,\n",
+        "  c.model AS `Model`,\n",
+        "  CAST(COALESCE(c.transpiled, TRUE) AS STRING) AS `Transpiled`,\n",
+        "  c.failure_reason AS `Failure Reason`\n",
+        "FROM classic_stable_pr2ip7.lakebridge_assessment.job_details j\n",
+        "LEFT JOIN classic_stable_pr2ip7.lakebridge_assessment.conversion_results c\n",
+        "  ON j.file_name = c.file_name"
       ]
     }
   ],
@@ -58,7 +98,7 @@
             "multilineTextboxSpec": {
               "lines": [
                 "## Lakebridge Migration Assessment\n",
-                "Powered by Databricks Labs Lakebridge \u00b7 bladespector analyzer"
+                "Powered by Databricks Labs Lakebridge · bladespector analyzer"
               ]
             }
           },
@@ -84,7 +124,7 @@
                     },
                     {
                       "name": "measure(Total Files)",
-                      "expression": "MEASURE(`Total Files`)"
+                      "expression": "COUNT(DISTINCT `File Name`)"
                     }
                   ],
                   "disaggregated": false
@@ -143,7 +183,7 @@
                     },
                     {
                       "name": "measure(Total Files)",
-                      "expression": "MEASURE(`Total Files`)"
+                      "expression": "COUNT(DISTINCT `File Name`)"
                     }
                   ],
                   "disaggregated": false
@@ -286,7 +326,7 @@
                   "fields": [
                     {
                       "name": "measure(Total Files)",
-                      "expression": "MEASURE(`Total Files`)"
+                      "expression": "COUNT(DISTINCT `File Name`)"
                     }
                   ],
                   "disaggregated": false
@@ -328,7 +368,7 @@
                   "fields": [
                     {
                       "name": "measure(High Complexity Files)",
-                      "expression": "MEASURE(`High Complexity Files`)"
+                      "expression": "COUNT(DISTINCT CASE WHEN `Complexity` = 'HIGH' THEN `File Name` END)"
                     }
                   ],
                   "disaggregated": false
@@ -370,7 +410,7 @@
                   "fields": [
                     {
                       "name": "measure(Low Complexity Files)",
-                      "expression": "MEASURE(`Low Complexity Files`)"
+                      "expression": "COUNT(DISTINCT CASE WHEN `Complexity` = 'LOW' THEN `File Name` END)"
                     }
                   ],
                   "disaggregated": false
@@ -415,7 +455,7 @@
             "multilineTextboxSpec": {
               "lines": [
                 "## Migration Cost Estimate\n",
-                "_Effort rates are configurable \u2014 edit the **Effort Hypothesis** table at the bottom of this page and re-run the notebook cell to update all figures._"
+                "_Effort rates are configurable — edit the **Effort Hypothesis** table at the bottom of this page and re-run the notebook cell to update all figures._"
               ]
             }
           },
@@ -437,7 +477,7 @@
                   "fields": [
                     {
                       "name": "measure(Effort (MD))",
-                      "expression": "MEASURE(`Effort (MD)`)"
+                      "expression": "SUM(`effort_md`)"
                     }
                   ],
                   "disaggregated": false
@@ -487,7 +527,7 @@
                   "fields": [
                     {
                       "name": "measure(Effort (MD))",
-                      "expression": "MEASURE(`Effort (MD)`)"
+                      "expression": "SUM(`effort_md`)"
                     }
                   ],
                   "filters": [
@@ -542,7 +582,7 @@
                   "fields": [
                     {
                       "name": "measure(Effort (MD))",
-                      "expression": "MEASURE(`Effort (MD)`)"
+                      "expression": "SUM(`effort_md`)"
                     }
                   ],
                   "filters": [
@@ -597,7 +637,7 @@
                   "fields": [
                     {
                       "name": "measure(Effort (MD))",
-                      "expression": "MEASURE(`Effort (MD)`)"
+                      "expression": "SUM(`effort_md`)"
                     },
                     {
                       "name": "profile",
@@ -663,12 +703,12 @@
                     },
                     {
                       "name": "measure(Effort (MD))",
-                      "expression": "MEASURE(`Effort (MD)`)"
+                      "expression": "SUM(`effort_md`)"
                     }
                   ],
                   "filters": [
                     {
-                      "expression": "`object_type` NOT IN ('\u2014 Overhead')"
+                      "expression": "`object_type` NOT IN ('— Overhead')"
                     }
                   ],
                   "disaggregated": false
@@ -745,7 +785,7 @@
                     },
                     {
                       "name": "measure(Effort (MD))",
-                      "expression": "MEASURE(`Effort (MD)`)"
+                      "expression": "SUM(`effort_md`)"
                     }
                   ],
                   "disaggregated": false
@@ -835,7 +875,7 @@
               "frame": {
                 "title": "Effort Hypothesis",
                 "showTitle": true,
-                "description": "Edit rates in the notebook cell 'Effort Hypothesis \u2014 seed Delta tables' and re-run to update.",
+                "description": "Edit rates in the notebook cell 'Effort Hypothesis — seed Delta tables' and re-run to update.",
                 "showDescription": true
               },
               "version": 2,
@@ -889,7 +929,7 @@
                     },
                     {
                       "name": "measure(Transpilability Rate)",
-                      "expression": "MEASURE(`Transpilability Rate`)"
+                      "expression": "COUNT(DISTINCT CASE WHEN `Transpiled` = 'true' THEN `File Name` END) * 100.0 / NULLIF(COUNT(DISTINCT `File Name`), 0)"
                     }
                   ],
                   "disaggregated": false
@@ -940,7 +980,7 @@
                   "fields": [
                     {
                       "name": "measure(Transpilability Rate)",
-                      "expression": "MEASURE(`Transpilability Rate`)"
+                      "expression": "COUNT(DISTINCT CASE WHEN `Transpiled` = 'true' THEN `File Name` END) * 100.0 / NULLIF(COUNT(DISTINCT `File Name`), 0)"
                     }
                   ],
                   "disaggregated": false
@@ -996,7 +1036,7 @@
                 "# Complexity Definitions\n",
                 "## Bladespector Assessment Rules\n",
                 "\n",
-                "Bladespector (Lakebridge's analyzer) categorizes source files into LOW / MEDIUM / HIGH complexity based on technology-specific heuristics. These are **analytic transpilability** indicators \u2014 they measure migration effort, NOT whether the LLM transpiler (Switch) can handle them."
+                "Bladespector (Lakebridge's analyzer) categorizes source files into LOW / MEDIUM / HIGH complexity based on technology-specific heuristics. These are **analytic transpilability** indicators — they measure migration effort, NOT whether the LLM transpiler (Switch) can handle them."
               ]
             }
           },
@@ -1045,7 +1085,7 @@
                 "| Complexity | Nodes | Example |\n",
                 "|---|---|---|\n",
                 "| **HIGH** | 20+ nodes | `10_ssis_data_quality_checks.dtsx` (21 nodes) |\n",
-                "| **MEDIUM** | 10\u201319 nodes | `07_ssis_order_enrichment.dtsx` (14 nodes) |\n",
+                "| **MEDIUM** | 10–19 nodes | `07_ssis_order_enrichment.dtsx` (14 nodes) |\n",
                 "| **LOW** | < 10 nodes | `05_ssis_customer_load.dtsx` (4 nodes) |\n",
                 "\n",
                 "Transpiler: `switch` (LLM-powered, Foundation Model: `databricks-claude-opus-4-8`). Switch can attempt any component regardless of bladespector's `supported` flag."
@@ -1066,13 +1106,13 @@
               "lines": [
                 "## SSIS Analytic Transpilability (bladespector `supported` flag)\n",
                 "\n",
-                "The `transformations.supported` column reflects whether bladespector's **rule-based engine** can categorize a component \u2014 NOT whether Switch can convert it.\n",
+                "The `transformations.supported` column reflects whether bladespector's **rule-based engine** can categorize a component — NOT whether Switch can convert it.\n",
                 "\n",
                 "**Supported (16 types):** ExecuteSQLTask, Pipeline, OLEDBSource, OLEDBDestination, Lookup, DerivedColumn, ConditionalSplit, Sort, MergeJoin, UnionAll, Aggregate, Multicast, RowCount, OLEDBCommand, DataConvert, FlatFileDestination\n",
                 "\n",
                 "**Not analytically supported (5 types):** SendMailTask, ScriptComponent, ForEachLoop, SequenceContainer, RowSampling\n",
                 "\n",
-                "> These \"unsupported\" flags are informational only. Switch (LLM) can transpile all of them \u2014 e.g., SendMailTask \u2192 Python notification step, ForEachLoop \u2192 Databricks foreach/map, SequenceContainer \u2192 task group."
+                "> These \"unsupported\" flags are informational only. Switch (LLM) can transpile all of them — e.g., SendMailTask → Python notification step, ForEachLoop → Databricks foreach/map, SequenceContainer → task group."
               ]
             }
           },
