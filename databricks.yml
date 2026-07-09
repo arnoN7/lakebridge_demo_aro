@@ -21,6 +21,12 @@ variables:
       SQL warehouse that runs the dashboard's queries. Change this to a warehouse in
       YOUR workspace (Databricks SQL → Warehouses → copy the ID from the URL/details).
     default: 263392e91167d7f6
+  node_type_id:
+    description: >-
+      Worker/driver VM SKU for the assessment job cluster. Override if the default is
+      unavailable in your region (Azure capacity stockout). Azure e.g. Standard_D4ds_v5;
+      AWS e.g. m5d.xlarge; GCP e.g. n2-standard-4.
+    default: Standard_D4ds_v5
 
 # ── Targets ───────────────────────────────────────────────────────────────────
 targets:
@@ -58,9 +64,8 @@ resources:
               input_path: ${var.input_path}
           new_cluster:
             spark_version: "15.4.x-scala2.12"
-            # ── Cloud-specific node type ─────────────────────────────────────
-            # Azure: Standard_DS3_v2   (change for AWS: m5.xlarge / GCP: n1-standard-4)
-            node_type_id: Standard_DS3_v2
+            # ── Cloud-specific node type (override via --var node_type_id=…) ──
+            node_type_id: ${var.node_type_id}
             num_workers: 1
 
   dashboards:

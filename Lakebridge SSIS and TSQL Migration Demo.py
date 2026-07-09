@@ -8,7 +8,9 @@
 # ]
 # ///
 # DBTITLE 1,Install Lakebridge
-# MAGIC %pip install databricks-labs-lakebridge openpyxl databricks-bb-plugin
+# MAGIC %pip install databricks-labs-lakebridge openpyxl databricks-bb-plugin "numpy<2"
+# MAGIC # numpy<2 pin: Lakebridge deps otherwise pull NumPy 2.x, which is ABI-incompatible
+# MAGIC # with DBR 15.4's pre-compiled pandas/pyarrow and crashes the Python kernel on restart.
 
 # COMMAND ----------
 
@@ -119,10 +121,14 @@ print(f"Supported source technologies: {Analyzer.supported_source_technologies()
 assessment_root = REPO_ROOT / "_output" / "assessment"
 assessment_root.mkdir(parents=True, exist_ok=True)
 
+# Folder-driven: only analyze technologies actually present. bladespector's
+# `-t SSIS` pass exits non-zero (status 2) on a folder with no .dtsx packages,
+# so we add SSIS only when SSIS files exist (e.g. a T-SQL-only client scope).
 platforms = {
     "MS SQL Server": assessment_root / "tsql_assessment.xlsx",
-    "SSIS":          assessment_root / "ssis_assessment.xlsx",
 }
+if any(input_root.rglob("*.dtsx")):
+    platforms["SSIS"] = assessment_root / "ssis_assessment.xlsx"
 
 for platform, report_path in platforms.items():
     json_path = report_path.with_suffix(".json")
@@ -161,6 +167,9 @@ def _col(c: str) -> str:
     return re.sub(r'\W+', '_', str(c).strip().lower()).strip('_')
 
 def read_sheet(xlsx_path: Path, sheet: str) -> pd.DataFrame:
+    # Tolerate a technology that wasn't analyzed (e.g. SSIS absent in a T-SQL-only run).
+    if not xlsx_path or not Path(xlsx_path).exists():
+        return pd.DataFrame()
     xl = pd.ExcelFile(xlsx_path, engine='openpyxl')
     if sheet not in xl.sheet_names:
         return pd.DataFrame()
@@ -197,7 +206,14 @@ for platform_label, report_path in platforms.items():
                        'categorization', 'number_of_nodes', 'included']])
 
 print("job_details")
-to_uc(pd.concat(frames, ignore_index=True), 'job_details')
+if frames:
+    to_uc(pd.concat(frames, ignore_index=True), 'job_details')
+else:
+    # No analyzer Job Details rows (e.g. a T-SQL-only scope with no SSIS). job_details
+    # is seeded entirely from the .sql files in the append step below; drop any prior
+    # table first so re-runs stay idempotent.
+    print("  [info] no analyzer Job Details rows — seeding job_details from .sql files below")
+    spark.sql(f"DROP TABLE IF EXISTS {UC_CAT}.{UC_SCHEMA}.job_details")
 
 # ── functions: T-SQL function call counts ────────────────────────────────
 fn_df = read_sheet(platforms['MS SQL Server'], 'Functions')
@@ -232,7 +248,7 @@ print("\nfunctions")
 to_uc(fn_df if not fn_df.empty else pd.DataFrame(columns=['function_name', 'call_count', 'platform']), 'functions')
 
 # ── transformations: SSIS component types ──────────────────────────────
-trans_df = read_sheet(platforms['SSIS'], 'Transformations')
+trans_df = read_sheet(platforms.get('SSIS'), 'Transformations')
 if not trans_df.empty:
     trans_df = trans_df[list(trans_df.columns[:5])].copy()
     trans_df.columns = ['transformation_type', 'occurrences', 'jobs_count', 'supported', 'component_level']
@@ -242,7 +258,7 @@ print("\ntransformations")
 to_uc(trans_df, 'transformations')
 
 # ── sql_statements: SQL embedded inside SSIS packages ─────────────────────
-sql_df = read_sheet(platforms['SSIS'], 'SQL Statements')
+sql_df = read_sheet(platforms.get('SSIS'), 'SQL Statements')
 if not sql_df.empty:
     sql_df = sql_df[list(sql_df.columns[:6])].copy()
     sql_df.columns = ['package_name', 'node', 'complexity', 'connection_type', 'length', 'sql_text']
@@ -255,27 +271,47 @@ to_uc(sql_df, 'sql_statements')
 # DBTITLE 1,Phase 2a — SQL Analysis and Conversion
 conversion_rows, converted_code = [], {}
 
+import re as _re
 for path in sorted(input_root.rglob("*.sql")):   # rglob → also picks up subfolders
-    src    = path.read_text(encoding="utf-8")
-    result = await engine.transpile(
-        source_dialect="tsql", target_dialect="databricks",
-        source_code=src, file_path=path
-    )
+    src = path.read_text(encoding="utf-8")
+    # Strip T-SQL `GO` batch separators — they are sqlcmd directives, not SQL statements,
+    # and make SqlglotEngine emit a None expression ('NoneType' object has no attribute 'copy').
+    src = _re.sub(r"(?im)^[ \t]*GO[ \t]*;?[ \t]*$", "", src)
     out_path = output_root / f"converted_{path.name}"
-    out_path.write_text(result.transpiled_code, encoding="utf-8")
-    converted_code[path.name] = result.transpiled_code
-    errors = result.error_list
-    conversion_rows.append({
-        "file_name":           path.name,
-        "file_type":           "SQL",
-        "engine":              "sqlglot",
-        "model":               None,
-        "success_count":       result.success_count,
-        "error_count":         len(errors),
-        "transpiled":          len(errors) == 0,
-        "failure_reason":      "; ".join(str(e) for e in errors) if errors else None,
-        "output_file":         out_path.name,
-    })
+    try:
+        result = await engine.transpile(
+            source_dialect="tsql", target_dialect="databricks",
+            source_code=src, file_path=path
+        )
+        out_path.write_text(result.transpiled_code, encoding="utf-8")
+        converted_code[path.name] = result.transpiled_code
+        errors = result.error_list
+        conversion_rows.append({
+            "file_name":           path.name,
+            "file_type":           "SQL",
+            "engine":              "sqlglot",
+            "model":               None,
+            "success_count":       result.success_count,
+            "error_count":         len(errors),
+            "transpiled":          len(errors) == 0,
+            "failure_reason":      "; ".join(str(e) for e in errors) if errors else None,
+            "output_file":         out_path.name,
+        })
+    except Exception as e:
+        # A single unconvertible file must not abort the whole assessment — record and continue.
+        msg = f"{type(e).__name__}: {str(e).splitlines()[0][:200]}"
+        print(f"  WARN {path.name}: transpile failed — {msg}")
+        conversion_rows.append({
+            "file_name":           path.name,
+            "file_type":           "SQL",
+            "engine":              "sqlglot",
+            "model":               None,
+            "success_count":       0,
+            "error_count":         1,
+            "transpiled":          False,
+            "failure_reason":      msg,
+            "output_file":         None,
+        })
 
 # Note: SSIS package rows are written to conversion_results by Phase 2b (BladeBridge),
 # with their real transpilation outcomes — not pre-registered here.
@@ -471,7 +507,10 @@ for dtsx_path in dtsx_files:
     })
 
 print(f"\n  Output dir: {ssis_output}")
-display(pd.DataFrame(ssis_results))
+if ssis_results:
+    display(pd.DataFrame(ssis_results))
+else:
+    print("  No SSIS packages to convert (no .dtsx in input) — skipping SSIS results table.")
 
 # ── Write real SSIS outcomes to conversion_results (MERGE — idempotent) ────────
 # One row per package, mirroring the SQL rows from Phase 2a. The dashboard's
@@ -660,8 +699,19 @@ UC_CAT    = dbutils.widgets.get("catalog")
 UC_SCHEMA = dbutils.widgets.get("schema")
 FQ = f"{UC_CAT}.{UC_SCHEMA}"
 
+def _try_metric_view(ddl: str, name: str) -> None:
+    # Metric views need a recent runtime (DBSQL / newer DBR); this job cluster (DBR 15.4)
+    # cannot parse `WITH METRICS`. The dashboard uses base-table datasets, so a failure
+    # here is non-fatal — log and continue so the assessment still completes.
+    try:
+        spark.sql(ddl)
+        print(f"✓ Created metric view {name}")
+    except Exception as e:
+        print(f"⚠ Skipped metric view {name}: {type(e).__name__}: {str(e).splitlines()[0][:160]}")
+        print("  Non-fatal — dashboard reads base tables, not metric views.")
+
 # 1) assessment_metrics — inventory × transpilability, 1 row per source file.
-spark.sql(f"""
+_try_metric_view(f"""
 CREATE OR REPLACE VIEW {FQ}.assessment_metrics
 WITH METRICS LANGUAGE YAML AS $$
 version: 1.1
@@ -709,12 +759,11 @@ measures:
   - name: Avg Nodes per File
     expr: AVG(number_of_nodes)
 $$
-""")
-print(f"✓ Created metric view {FQ}.assessment_metrics")
+""", f"{FQ}.assessment_metrics")
 
 # 2) effort_metrics — per-object effort estimate (+ overhead rows), driven by the
 #    rate card. SSIS vs SQL is keyed off platform (job_type is 'Package'/'SQL File').
-spark.sql(f"""
+_try_metric_view(f"""
 CREATE OR REPLACE VIEW {FQ}.effort_metrics
 WITH METRICS LANGUAGE YAML AS $$
 version: 1.1
@@ -768,12 +817,14 @@ measures:
   - name: Effort (MD)
     expr: SUM(effort_md)
 $$
-""")
-print(f"✓ Created metric view {FQ}.effort_metrics")
+""", f"{FQ}.effort_metrics")
 
-# Quick sanity check
-display(spark.sql(f"""
-  SELECT 'Total files'        AS metric, CAST(MEASURE(`Total Files`) AS STRING) AS value FROM {FQ}.assessment_metrics
-  UNION ALL SELECT 'Transpilability %', CAST(ROUND(MEASURE(`Transpilability Rate`),1) AS STRING) FROM {FQ}.assessment_metrics
-  UNION ALL SELECT 'Total effort (MD)', CAST(MEASURE(`Effort (MD)`) AS STRING) FROM {FQ}.effort_metrics
-"""))
+# Quick sanity check (only meaningful if the metric views were created)
+try:
+    display(spark.sql(f"""
+      SELECT 'Total files'        AS metric, CAST(MEASURE(`Total Files`) AS STRING) AS value FROM {FQ}.assessment_metrics
+      UNION ALL SELECT 'Transpilability %', CAST(ROUND(MEASURE(`Transpilability Rate`),1) AS STRING) FROM {FQ}.assessment_metrics
+      UNION ALL SELECT 'Total effort (MD)', CAST(MEASURE(`Effort (MD)`) AS STRING) FROM {FQ}.effort_metrics
+    """))
+except Exception as e:
+    print(f"⚠ Metric-view sanity check skipped: {type(e).__name__}: {str(e).splitlines()[0][:160]}")
