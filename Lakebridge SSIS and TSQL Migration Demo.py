@@ -579,25 +579,22 @@ if ssis_rows:
 
 # COMMAND ----------
 
-# DBTITLE 1,Prerequisite — install Switch (one-time, per workspace)
+# DBTITLE 1,Using the Switch LLM converter (auto-installed by this notebook)
 # MAGIC %md
 # MAGIC ### Using the Switch LLM converter (`use_switch=true`)
-# MAGIC **Switch is NOT deployed by this bundle** — it is a one-time Lakebridge install per
-# MAGIC workspace. It deploys a Databricks job named **`Lakebridge_Switch`** that this notebook
-# MAGIC triggers. Run these **once, locally, with the Databricks CLI** (authenticated to the
-# MAGIC target workspace) before setting `use_switch=true`:
+# MAGIC Switch deploys a Databricks job named **`Lakebridge_Switch`** that this notebook triggers.
+# MAGIC **No local install is required** — Switch ships with Lakebridge (pip-installed in cell 1),
+# MAGIC so **Phase 2c deploys `Lakebridge_Switch` from this notebook automatically** the first time
+# MAGIC you run with `use_switch=true` (via `SwitchDeployment`, serverless). Everything runs in the
+# MAGIC workspace; nothing is installed on a laptop.
 # MAGIC
+# MAGIC **Optional** — you can instead pre-install Switch from the Databricks CLI:
 # MAGIC ```bash
-# MAGIC databricks labs install lakebridge          # installs the Lakebridge CLI extension
-# MAGIC databricks labs lakebridge install-transpile # deploys the Lakebridge_Switch job (+ config)
+# MAGIC databricks labs install lakebridge
+# MAGIC databricks labs lakebridge install-transpile   # prompts for dialect / model / catalog-schema
 # MAGIC ```
-# MAGIC `install-transpile` prompts for the source dialect, foundation model, and catalog/schema,
-# MAGIC then creates the `Lakebridge_Switch` job (serverless by default; set
-# MAGIC `LAKEBRIDGE_CLUSTER_TYPE=CLASSIC` for a classic cluster).
-# MAGIC
-# MAGIC If Switch is **not** installed, Phase 2c below does not fail — it stages the failing
-# MAGIC procedures in the Volume and prints the install command to run. Once `Lakebridge_Switch`
-# MAGIC exists, re-run with `use_switch=true`.
+# MAGIC Either way, once `Lakebridge_Switch` exists, `use_switch=true` extracts the failing
+# MAGIC procedures to the Volume and triggers Switch on just those.
 
 # COMMAND ----------
 
@@ -641,16 +638,30 @@ else:
             n += 1
         print(f"Extracted {n} failing procedures → {switch_in}")
 
-        # 3) locate the deployed Switch job
-        switch_job = next((j for j in w.jobs.list()
-                           if j.settings and j.settings.name == "Lakebridge_Switch"), None)
-        if switch_job is None:
-            print("⚠ Lakebridge_Switch job not found. Install once: databricks labs lakebridge install-transpile")
-            print(f"  Procedures are staged at {switch_in}; re-run with use_switch=true afterwards.")
+        # 3) locate the Switch job — or deploy it FROM THIS NOTEBOOK (no local CLI needed).
+        # Switch ships with Lakebridge (pip-installed in cell 1), so SwitchDeployment can
+        # create the Lakebridge_Switch job in-workspace on first use. This keeps the demo
+        # self-contained: everything runs in the workspace, nothing installed on a laptop.
+        from databricks.labs.blueprint.installation import Installation
+        from databricks.labs.blueprint.installer import InstallState
+        from databricks.labs.lakebridge.deployment.switch import SwitchDeployment
+        _inst  = Installation(w, "lakebridge")
+        _state = InstallState.from_installation(_inst)
+        job_id = _state.jobs.get("Switch")
+        if not job_id:  # fall back to lookup by job name
+            _j = next((j for j in w.jobs.list() if j.settings and j.settings.name == "Lakebridge_Switch"), None)
+            job_id = _j.job_id if _j else None
+        if not job_id:
+            print("Lakebridge_Switch not found — deploying Switch from the notebook (one-time)…")
+            SwitchDeployment(w, _inst, _state).install(use_serverless=True)
+            job_id = _state.jobs.get("Switch")
+            print(f"  Deployed Switch job id={job_id}")
+
+        if not job_id:
+            print(f"⚠ Could not deploy/find the Switch job. Procedures staged at {switch_in}.")
         else:
             # 4) write a Switch config file. target_type / source_format etc. come from this
-            # YAML (via switch_config_path), NOT job parameters — and the deployed job's
-            # bundled default can be absent, which makes target_type None and crashes Switch.
+            # YAML (via switch_config_path), NOT job parameters.
             cfg_path = Path(f"/Volumes/{UC_CAT}/{UC_SCHEMA}/assessment_output/switch_config.yml")
             cfg_path.write_text(
                 'target_type: "notebook"\n'      # full pipeline: analyze→convert→validate→fix
@@ -666,7 +677,7 @@ else:
             _ts   = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
             _user = w.current_user.me().user_name
             out_folder = f"/Workspace/Users/{_user}/switch_output/{UC_SCHEMA}_{_ts}"
-            run = w.jobs.run_now(job_id=switch_job.job_id, job_parameters={
+            run = w.jobs.run_now(job_id=int(job_id), job_parameters={
                 "source_tech":        "mssql",     # SQL Server / APS T-SQL
                 "input_dir":          str(switch_in),
                 "output_dir":         out_folder,
@@ -675,12 +686,11 @@ else:
                 "schema":             UC_SCHEMA,
                 "switch_config_path": str(cfg_path),
             })
-            url = f"{w.config.host}/jobs/{switch_job.job_id}/runs/{run.run_id}"
+            url = f"{w.config.host}/jobs/{job_id}/runs/{run.run_id}"
             print(f"✓ Switch triggered on {n} procedures using {_switch_model}")
             print(f"  Run:    {url}")
             print(f"  Output: {out_folder}  (converted notebooks)")
-            print("  Switch runs asynchronously (analyze→convert→validate→fix). Review its output")
-            print("  folder + Switch result tables when it completes; it does not block this job.")
+            print("  Switch runs asynchronously (analyze→convert→validate→fix); does not block this job.")
 
 # COMMAND ----------
 
