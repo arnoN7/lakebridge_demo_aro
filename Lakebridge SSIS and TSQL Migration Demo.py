@@ -67,6 +67,8 @@ dbutils.library.restartPython()
 dbutils.widgets.text("catalog", "classic_stable_pr2ip7", "UC Catalog")
 dbutils.widgets.text("schema",  "lakebridge_assessment",  "UC Schema")
 dbutils.widgets.text("input_path", "", "Input path (blank = bundled sample_assets)")
+dbutils.widgets.text("use_switch", "false", "Use Switch LLM converter (true/false)")
+dbutils.widgets.text("switch_model", "databricks-claude-sonnet-5", "Switch foundation model")
 UC_CAT    = dbutils.widgets.get("catalog")
 UC_SCHEMA = dbutils.widgets.get("schema")
 
@@ -574,6 +576,75 @@ if ssis_rows:
     """)
     print(f"\n✓ {len(ssis_rows)} SSIS package rows upserted → {target_table}")
     display(spark.table(target_table).orderBy("file_name"))
+
+# COMMAND ----------
+
+# DBTITLE 1,Phase 2c — Switch LLM conversion of failing procedures (optional)
+# Targeted hybrid: Phase 2a (deterministic sqlglot) already converts ~99% of tables/views.
+# The T-SQL *procedures* it can't parse (control flow, dynamic SQL, MERGE) are sent to
+# Lakebridge **Switch** — the agentic LLM transpiler — but ONLY those failing procedures,
+# to minimise LLM cost. Entirely gated by the `use_switch` widget/variable.
+import re, shutil
+from datetime import datetime, timezone
+
+_use_switch   = dbutils.widgets.get("use_switch").strip().lower() in ("true", "1", "yes")
+_switch_model = dbutils.widgets.get("switch_model").strip() or "databricks-claude-sonnet-5"
+
+if not _use_switch:
+    print("use_switch=false → skipping Switch. Deterministic sqlglot results stand.")
+    print("  Set use_switch=true (databricks.yml var or the widget) to LLM-convert the failing procedures.")
+else:
+    from databricks.sdk import WorkspaceClient
+    w = WorkspaceClient()
+
+    # 1) procedures the deterministic engine could not transpile
+    fails = [r.file_name for r in spark.sql(
+        f"SELECT file_name FROM {UC_CAT}.{UC_SCHEMA}.conversion_results "
+        f"WHERE NOT transpiled AND file_type = 'CREATE PROCEDURE'").collect()]
+    src_by_id = {o["object_id"]: o for o in sql_objects_list}
+
+    if not fails:
+        print("No failing procedures — nothing for Switch to do.")
+    else:
+        # 2) extract ONLY those procedures, one file each, into a UC Volume input folder
+        switch_in = Path(f"/Volumes/{UC_CAT}/{UC_SCHEMA}/assessment_output/switch_input")
+        shutil.rmtree(switch_in, ignore_errors=True)
+        switch_in.mkdir(parents=True, exist_ok=True)
+        n = 0
+        for oid in fails:
+            o = src_by_id.get(oid)
+            if not o:
+                continue
+            (switch_in / (re.sub(r"[^0-9A-Za-z_.]", "_", oid) + ".sql")).write_text(o["source"], encoding="utf-8")
+            n += 1
+        print(f"Extracted {n} failing procedures → {switch_in}")
+
+        # 3) locate the deployed Switch job
+        switch_job = next((j for j in w.jobs.list()
+                           if j.settings and j.settings.name == "Lakebridge_Switch"), None)
+        if switch_job is None:
+            print("⚠ Lakebridge_Switch job not found. Install once: databricks labs lakebridge install-transpile")
+            print(f"  Procedures are staged at {switch_in}; re-run with use_switch=true afterwards.")
+        else:
+            # 4) trigger Switch on just those procedures (source-dialect mssql = SQL Server T-SQL)
+            _ts   = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+            _user = w.current_user.me().user_name
+            out_folder = f"/Workspace/Users/{_user}/switch_output/{UC_SCHEMA}_{_ts}"
+            run = w.jobs.run_now(job_id=switch_job.job_id, job_parameters={
+                "source_tech":      "mssql",       # SQL Server / APS T-SQL
+                "input_dir":        str(switch_in),
+                "output_dir":       out_folder,
+                "foundation_model": _switch_model,
+                "catalog":          UC_CAT,
+                "schema":           UC_SCHEMA,
+                "target_type":      "notebook",    # full pipeline: analyze→convert→validate→fix
+            })
+            url = f"{w.config.host}/jobs/{switch_job.job_id}/runs/{run.run_id}"
+            print(f"✓ Switch triggered on {n} procedures using {_switch_model}")
+            print(f"  Run:    {url}")
+            print(f"  Output: {out_folder}  (converted notebooks)")
+            print("  Switch runs asynchronously (analyze→convert→validate→fix). Review its output")
+            print("  folder + Switch result tables when it completes; it does not block this job.")
 
 # COMMAND ----------
 

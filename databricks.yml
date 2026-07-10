@@ -27,6 +27,14 @@ variables:
       unavailable in your region (Azure capacity stockout). Azure e.g. Standard_D4ds_v5;
       AWS e.g. m5d.xlarge; GCP e.g. n2-standard-4.
     default: Standard_D4ds_v5
+  use_switch:
+    description: >-
+      "true" = after the deterministic pass, trigger Lakebridge Switch (LLM) on ONLY the
+      procedures sqlglot could not transpile; "false" (default) = skip Switch entirely.
+    default: "false"
+  switch_model:
+    description: "Foundation Model serving endpoint Switch uses for LLM conversion."
+    default: databricks-claude-sonnet-5
 
 # ── Targets ───────────────────────────────────────────────────────────────────
 targets:
@@ -59,9 +67,11 @@ resources:
           notebook_task:
             notebook_path: ./Lakebridge SSIS and TSQL Migration Demo.py
             base_parameters:
-              catalog:    ${var.catalog}
-              schema:     ${var.schema}
-              input_path: ${var.input_path}
+              catalog:      ${var.catalog}
+              schema:       ${var.schema}
+              input_path:   ${var.input_path}
+              use_switch:   ${var.use_switch}
+              switch_model: ${var.switch_model}
           new_cluster:
             spark_version: "15.4.x-scala2.12"
             # ── Cloud-specific node type (override via --var node_type_id=…) ──
