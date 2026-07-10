@@ -102,10 +102,38 @@ engine = SqlglotEngine()
 
 print(f"Supported source dialects: {engine.supported_dialects}\n")
 print(f"Repo root:         {REPO_ROOT}")
-_n_src = len(list(input_root.rglob("*.sql")) + list(input_root.rglob("*.dtsx")))
-print(f"Input folder:      {input_root}  ({_n_src} .sql/.dtsx files, incl. subfolders)")
+_n_src = len(list(input_root.rglob("*.sql")) + list(input_root.rglob("*.dsql")) + list(input_root.rglob("*.dtsx")))
+print(f"Input folder:      {input_root}  ({_n_src} .sql/.dsql/.dtsx files, incl. subfolders)")
 print(f"T-SQL output:      {output_root}")
 print(f"SSIS output:       {ssis_output}")
+
+# COMMAND ----------
+
+# DBTITLE 1,Phase 0a — Normalize APS/PDW source to T-SQL (in-pipeline)
+# Microsoft APS / Parallel Data Warehouse exports (.dsql) use MPP-only DDL the T-SQL
+# parser rejects: WITH (DISTRIBUTION=…, CLUSTERED [COLUMNSTORE] INDEX…, HEAP,
+# PARTITION…), CREATE STATISTICS, CREATE INDEX, varchar(-1). scripts/clean_aps_sql.py
+# rewrites the source into T-SQL-compliant .sql before assessment/transpilation.
+# No-op for source without APS/PDW constructs (e.g. the bundled sample_assets).
+import sys as _sys
+_sys.path.insert(0, str(REPO_ROOT / "scripts"))
+import clean_aps_sql
+
+if clean_aps_sql.is_pdw_source(input_root):
+    cleaned_root = Path("/local_disk0/aps_cleaned")
+    import shutil as _shutil
+    if cleaned_root.exists():
+        _shutil.rmtree(cleaned_root)
+    s = clean_aps_sql.clean_folder(input_root, cleaned_root)
+    print(f"APS/PDW source detected — normalized {s['files']} file(s) to T-SQL:")
+    print(f"  WITH() storage clauses removed : {s['with']}")
+    print(f"  CREATE STATISTICS removed      : {s['stats']}")
+    print(f"  CREATE INDEX removed           : {s['index']}")
+    print(f"  varchar(-1) -> varchar(max)    : {s['vmax']}")
+    input_root = cleaned_root      # all later phases read the cleaned source
+    print(f"  Downstream phases will read cleaned source from: {input_root}")
+else:
+    print("No APS/PDW constructs detected — using source as-is.")
 
 # COMMAND ----------
 
