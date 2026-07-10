@@ -579,6 +579,28 @@ if ssis_rows:
 
 # COMMAND ----------
 
+# DBTITLE 1,Prerequisite — install Switch (one-time, per workspace)
+# MAGIC %md
+# MAGIC ### Using the Switch LLM converter (`use_switch=true`)
+# MAGIC **Switch is NOT deployed by this bundle** — it is a one-time Lakebridge install per
+# MAGIC workspace. It deploys a Databricks job named **`Lakebridge_Switch`** that this notebook
+# MAGIC triggers. Run these **once, locally, with the Databricks CLI** (authenticated to the
+# MAGIC target workspace) before setting `use_switch=true`:
+# MAGIC
+# MAGIC ```bash
+# MAGIC databricks labs install lakebridge          # installs the Lakebridge CLI extension
+# MAGIC databricks labs lakebridge install-transpile # deploys the Lakebridge_Switch job (+ config)
+# MAGIC ```
+# MAGIC `install-transpile` prompts for the source dialect, foundation model, and catalog/schema,
+# MAGIC then creates the `Lakebridge_Switch` job (serverless by default; set
+# MAGIC `LAKEBRIDGE_CLUSTER_TYPE=CLASSIC` for a classic cluster).
+# MAGIC
+# MAGIC If Switch is **not** installed, Phase 2c below does not fail — it stages the failing
+# MAGIC procedures in the Volume and prints the install command to run. Once `Lakebridge_Switch`
+# MAGIC exists, re-run with `use_switch=true`.
+
+# COMMAND ----------
+
 # DBTITLE 1,Phase 2c — Switch LLM conversion of failing procedures (optional)
 # Targeted hybrid: Phase 2a (deterministic sqlglot) already converts ~99% of tables/views.
 # The T-SQL *procedures* it can't parse (control flow, dynamic SQL, MERGE) are sent to
