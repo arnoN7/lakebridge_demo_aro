@@ -626,18 +626,32 @@ else:
             print("⚠ Lakebridge_Switch job not found. Install once: databricks labs lakebridge install-transpile")
             print(f"  Procedures are staged at {switch_in}; re-run with use_switch=true afterwards.")
         else:
-            # 4) trigger Switch on just those procedures (source-dialect mssql = SQL Server T-SQL)
+            # 4) write a Switch config file. target_type / source_format etc. come from this
+            # YAML (via switch_config_path), NOT job parameters — and the deployed job's
+            # bundled default can be absent, which makes target_type None and crashes Switch.
+            cfg_path = Path(f"/Volumes/{UC_CAT}/{UC_SCHEMA}/assessment_output/switch_config.yml")
+            cfg_path.write_text(
+                'target_type: "notebook"\n'      # full pipeline: analyze→convert→validate→fix
+                'source_format: "sql"\n'
+                'comment_lang: "English"\n'
+                'log_level: "INFO"\n'
+                'token_count_threshold: 20000\n'
+                'concurrency: 4\n'
+                'max_fix_attempts: 1\n'
+                'sdp_language: "python"\n', encoding="utf-8")
+
+            # 5) trigger Switch on just those procedures (source-dialect mssql = SQL Server T-SQL)
             _ts   = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
             _user = w.current_user.me().user_name
             out_folder = f"/Workspace/Users/{_user}/switch_output/{UC_SCHEMA}_{_ts}"
             run = w.jobs.run_now(job_id=switch_job.job_id, job_parameters={
-                "source_tech":      "mssql",       # SQL Server / APS T-SQL
-                "input_dir":        str(switch_in),
-                "output_dir":       out_folder,
-                "foundation_model": _switch_model,
-                "catalog":          UC_CAT,
-                "schema":           UC_SCHEMA,
-                "target_type":      "notebook",    # full pipeline: analyze→convert→validate→fix
+                "source_tech":        "mssql",     # SQL Server / APS T-SQL
+                "input_dir":          str(switch_in),
+                "output_dir":         out_folder,
+                "foundation_model":   _switch_model,
+                "catalog":            UC_CAT,
+                "schema":             UC_SCHEMA,
+                "switch_config_path": str(cfg_path),
             })
             url = f"{w.config.host}/jobs/{switch_job.job_id}/runs/{run.run_id}"
             print(f"✓ Switch triggered on {n} procedures using {_switch_model}")
