@@ -360,56 +360,28 @@ print(f"  Wrote {len(_by_file)} converted SQL file(s) → {output_root}")
 # with their real transpilation outcomes — not pre-registered here.
 
 for row in conversion_rows:
-    row.setdefault("transpilation_scope", "Full file")
+    row.setdefault("transpilation_scope", "Object")
     row.setdefault("failure_reason", None)
 
 conversion_df = pd.DataFrame(conversion_rows)
 display(conversion_df)
 
-# ── Persist to UC without replacing the table object ──────────────────────────
+# ── Persist to UC — Phase 2a fully REPLACES conversion_results with the current
+# per-object SQL rows, so rows from a prior run keyed differently (e.g. old
+# file-level rows) never linger. Phase 2b (SSIS) MERGEs its package rows in after.
 target_table = f"{UC_CAT}.{UC_SCHEMA}.conversion_results"
-spark.sql(f"""
-    CREATE TABLE IF NOT EXISTS {target_table} (
-        file_name STRING,
-        file_type STRING,
-        engine STRING,
-        model STRING,
-        success_count BIGINT,
-        error_count BIGINT,
-        transpiled BOOLEAN,
-        failure_reason STRING,
-        transpilation_scope STRING,
-        output_file STRING
-    ) USING DELTA
-""")
-
-for col in ["engine STRING", "model STRING", "failure_reason STRING", "transpilation_scope STRING"]:
-    try:
-        spark.sql(f"ALTER TABLE {target_table} ADD COLUMNS ({col})")
-    except Exception:
-        pass
-
-spark.createDataFrame(conversion_df).createOrReplaceTempView("conversion_results_updates")
-spark.sql(f"""
-    MERGE INTO {target_table} AS t
-    USING conversion_results_updates AS s
-    ON t.file_name = s.file_name
-    WHEN MATCHED THEN UPDATE SET
-      t.file_type = s.file_type,
-      t.engine = s.engine,
-      t.model = s.model,
-      t.success_count = s.success_count,
-      t.error_count = s.error_count,
-      t.transpiled = s.transpiled,
-      t.failure_reason = s.failure_reason,
-      t.transpilation_scope = s.transpilation_scope,
-      t.output_file = s.output_file
-    WHEN NOT MATCHED THEN INSERT (
-      file_name, file_type, engine, model, success_count, error_count, transpiled, failure_reason, transpilation_scope, output_file
-    ) VALUES (
-      s.file_name, s.file_type, s.engine, s.model, s.success_count, s.error_count, s.transpiled, s.failure_reason, s.transpilation_scope, s.output_file
-    )
-""")
+_cols = ["file_name", "file_type", "engine", "model", "success_count",
+         "error_count", "transpiled", "failure_reason", "transpilation_scope", "output_file"]
+if conversion_rows:
+    (spark.createDataFrame(conversion_df[_cols])
+          .write.format("delta").mode("overwrite").option("overwriteSchema", "true")
+          .saveAsTable(target_table))
+    print(f"✓ {len(conversion_rows)} rows written (overwrite) → {target_table}")
+else:
+    spark.sql(f"CREATE TABLE IF NOT EXISTS {target_table} ("
+              "file_name STRING, file_type STRING, engine STRING, model STRING, "
+              "success_count BIGINT, error_count BIGINT, transpiled BOOLEAN, "
+              "failure_reason STRING, transpilation_scope STRING, output_file STRING) USING DELTA")
 
 print(f"✓ {len(conversion_rows)} rows upserted → {target_table}")
 display(spark.table(target_table).orderBy("file_name"))

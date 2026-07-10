@@ -72,7 +72,7 @@
       "queryLines": [
         "SELECT\n",
         "  j.platform AS `Platform`,\n",
-        "  j.file_name AS `File Name`,\n",
+        "  j.file_name AS `Object`,\n",
         "  j.job_type AS `Job Type`,\n",
         "  j.categorization AS `Complexity`,\n",
         "  j.included AS `Included`,\n",
@@ -123,8 +123,8 @@
                       "expression": "`Complexity`"
                     },
                     {
-                      "name": "countdistinct(File Name)",
-                      "expression": "COUNT(DISTINCT `File Name`)"
+                      "name": "countdistinct(Object)",
+                      "expression": "COUNT(DISTINCT `Object`)"
                     }
                   ],
                   "disaggregated": false
@@ -134,7 +134,7 @@
             "spec": {
               "version": 3,
               "frame": {
-                "title": "Files by Complexity",
+                "title": "Objects by Complexity",
                 "showTitle": true
               },
               "widgetType": "bar",
@@ -146,7 +146,7 @@
                   }
                 },
                 "y": {
-                  "fieldName": "countdistinct(File Name)",
+                  "fieldName": "countdistinct(Object)",
                   "scale": {
                     "type": "quantitative"
                   }
@@ -185,8 +185,8 @@
                       "expression": "`Platform`"
                     },
                     {
-                      "name": "countdistinct(File Name)",
-                      "expression": "COUNT(DISTINCT `File Name`)"
+                      "name": "countdistinct(Object)",
+                      "expression": "COUNT(DISTINCT `Object`)"
                     }
                   ],
                   "disaggregated": false
@@ -196,7 +196,7 @@
             "spec": {
               "version": 3,
               "frame": {
-                "title": "Files by Platform",
+                "title": "Objects by Platform",
                 "showTitle": true
               },
               "widgetType": "bar",
@@ -208,7 +208,7 @@
                   }
                 },
                 "y": {
-                  "fieldName": "countdistinct(File Name)",
+                  "fieldName": "countdistinct(Object)",
                   "scale": {
                     "type": "quantitative"
                   }
@@ -245,8 +245,8 @@
                   "datasetName": "migration_summary",
                   "fields": [
                     {
-                      "name": "File Name",
-                      "expression": "`File Name`"
+                      "name": "Object",
+                      "expression": "`Object`"
                     },
                     {
                       "name": "Platform",
@@ -279,7 +279,7 @@
             ],
             "spec": {
               "frame": {
-                "title": "File Inventory",
+                "title": "Object Inventory",
                 "showTitle": true
               },
               "version": 2,
@@ -287,7 +287,7 @@
               "encodings": {
                 "columns": [
                   {
-                    "fieldName": "File Name"
+                    "fieldName": "Object"
                   },
                   {
                     "fieldName": "Platform"
@@ -809,7 +809,7 @@
                     },
                     {
                       "name": "measure(Transpilability Rate)",
-                      "expression": "COUNT(DISTINCT CASE WHEN `Transpiled` = 'true' THEN `File Name` END) * 100.0 / NULLIF(COUNT(DISTINCT `File Name`), 0)"
+                      "expression": "COUNT(DISTINCT CASE WHEN `Transpiled` = 'true' THEN `Object` END) * 100.0 / NULLIF(COUNT(DISTINCT `Object`), 0)"
                     }
                   ],
                   "disaggregated": false
@@ -860,7 +860,7 @@
                   "fields": [
                     {
                       "name": "measure(Transpilability Rate)",
-                      "expression": "COUNT(DISTINCT CASE WHEN `Transpiled` = 'true' THEN `File Name` END) * 100.0 / NULLIF(COUNT(DISTINCT `File Name`), 0)"
+                      "expression": "COUNT(DISTINCT CASE WHEN `Transpiled` = 'true' THEN `Object` END) * 100.0 / NULLIF(COUNT(DISTINCT `Object`), 0)"
                     }
                   ],
                   "disaggregated": false
@@ -916,7 +916,7 @@
                 "# Complexity Definitions\n",
                 "## Bladespector Assessment Rules\n",
                 "\n",
-                "Bladespector (Lakebridge's analyzer) categorizes source files into LOW / MEDIUM / HIGH complexity based on technology-specific heuristics. These are **analytic transpilability** indicators — they measure migration effort, NOT whether the LLM transpiler (Switch) can handle them."
+                "Bladespector (Lakebridge's analyzer) categorizes objects into LOW / MEDIUM / HIGH complexity based on technology-specific heuristics. These are **analytic transpilability** indicators — they measure migration effort, NOT whether the LLM transpiler (Switch) can handle them."
               ]
             }
           },
@@ -934,7 +934,7 @@
               "lines": [
                 "## T-SQL (MS SQL Server)\n",
                 "\n",
-                "Complexity is derived from the **file purpose** (naming convention):\n",
+                "Complexity is derived from each object's size (SQL AST node count):\n",
                 "\n",
                 "| Complexity | Rule | Examples |\n",
                 "|---|---|---|\n",
@@ -942,7 +942,7 @@
                 "| **MEDIUM** | ETL patterns: extract, incremental load | `incremental_extract.sql` |\n",
                 "| **LOW** | Simple DDL, schema definitions, basic queries | `schema_sales.sql` |\n",
                 "\n",
-                "Transpiler: `sqlglot` (deterministic, no LLM). All T-SQL files are transpilable."
+                "Transpiler: `sqlglot` (deterministic, no LLM). Transpilability is measured per object."
               ]
             }
           },
