@@ -120,10 +120,10 @@ _sys.path.insert(0, str(REPO_ROOT / "scripts"))
 import clean_aps_sql
 
 if clean_aps_sql.is_pdw_source(input_root):
-    cleaned_root = Path("/local_disk0/aps_cleaned")
-    import shutil as _shutil
-    if cleaned_root.exists():
-        _shutil.rmtree(cleaned_root)
+    # Use a guaranteed-writable temp dir — /local_disk0 is not writable on serverless
+    # or UC shared-access clusters. tempfile picks the right local FS on any compute.
+    import tempfile as _tempfile
+    cleaned_root = Path(_tempfile.mkdtemp(prefix="aps_cleaned_"))
     s = clean_aps_sql.clean_folder(input_root, cleaned_root)
     print(f"APS/PDW source detected — normalized {s['files']} file(s) to T-SQL:")
     print(f"  WITH() storage clauses removed : {s['with']}")
