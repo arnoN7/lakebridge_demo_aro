@@ -93,8 +93,13 @@ except Exception:
 _input_path = dbutils.widgets.get("input_path").strip()
 input_root  = Path(_input_path) if _input_path else (REPO_ROOT / "sample_assets")
 
-output_root = REPO_ROOT / "_output" / "converted"   # T-SQL conversions (Phase 2a)
-ssis_output = REPO_ROOT / "_output" / "ssis_sdp"     # SSIS conversions  (Phase 2b, BladeBridge)
+# Outputs go to a UC Volume (never the repo / workspace files), so results live with
+# the data and survive redeploys. A dedicated `assessment_output` volume is created
+# under the target schema.
+spark.sql(f"CREATE VOLUME IF NOT EXISTS {UC_CAT}.{UC_SCHEMA}.assessment_output")
+_out_base   = Path(f"/Volumes/{UC_CAT}/{UC_SCHEMA}/assessment_output")
+output_root = _out_base / "converted"    # T-SQL conversions (Phase 2a)
+ssis_output = _out_base / "ssis_sdp"      # SSIS conversions  (Phase 2b, BladeBridge)
 output_root.mkdir(parents=True, exist_ok=True)
 ssis_output.mkdir(parents=True, exist_ok=True)
 
@@ -146,7 +151,11 @@ from databricks.labs.bladespector.analyzer import Analyzer
 
 print(f"Supported source technologies: {Analyzer.supported_source_technologies()}\n")
 
-assessment_root = REPO_ROOT / "_output" / "assessment"
+# The assessment .xlsx is an intermediate artefact written by the bladespector native
+# binary — keep it on local disk (reliable for the binary), not the repo. Final outputs
+# (converted code) go to the Volume.
+import tempfile as _tf
+assessment_root = Path(_tf.mkdtemp(prefix="aps_assessment_"))
 assessment_root.mkdir(parents=True, exist_ok=True)
 
 # Folder-driven: only analyze technologies actually present. bladespector's
@@ -251,26 +260,28 @@ if not fn_df.empty:
     fn_df = fn_df.dropna(subset=['function_name'])
     fn_df['call_count'] = pd.to_numeric(fn_df['call_count'], errors='coerce').fillna(0).astype(int)
     fn_df['platform'] = 'MS SQL Server'
-# ── standalone .sql files → append as MS SQL Server entries ──────────────────────
-# rglob recurses into subfolders, matching bladespector (which also traverses them),
-# so you can organise the input folder/Volume into subfolders.
-sql_file_rows = []
-for f in sorted(input_root.rglob("*.sql")):
-    name = f.name
-    cat = ("HIGH" if any(k in name.lower() for k in ["sp_", "upsert"])
-           else "MEDIUM" if any(k in name.lower() for k in ["extract", "incremental", "load"])
-           else "LOW")
-    sql_file_rows.append({
-        "platform": "MS SQL Server", "file_name": name,
-        "job_type": "SQL File", "categorization": cat,
-        "number_of_nodes": 1, "included": "YES"
-    })
-if sql_file_rows:
-    sql_files_df = pd.DataFrame(sql_file_rows)
-    spark.createDataFrame(sql_files_df).write.format("delta").mode("append") \
+# ── standalone SQL → one job_details row PER OBJECT (table / view / proc / …) ─────
+# Bulk .sql dumps hold hundreds of objects each; a per-file view would be meaningless
+# ("18 files, all LOW, 0% transpilable"). scripts/sql_objects.py splits every file
+# into individual objects with real per-object complexity (AST size). The resulting
+# `sql_objects_list` is reused by Phase 2a for per-object transpilation.
+_sys.path.insert(0, str(REPO_ROOT / "scripts"))
+import sql_objects
+sql_objects_list = sql_objects.collect(input_root)
+if sql_objects_list:
+    obj_rows = [{
+        "platform": "MS SQL Server",
+        "file_name": o["object_id"],          # unique key; joins conversion_results
+        "job_type": o["object_type"],
+        "categorization": o["complexity"],
+        "number_of_nodes": int(o["nodes"]),
+        "included": "YES",
+    } for o in sql_objects_list]
+    spark.createDataFrame(pd.DataFrame(obj_rows)).write.format("delta").mode("append") \
          .saveAsTable(f"{UC_CAT}.{UC_SCHEMA}.job_details")
-    print(f"\n  Appended {len(sql_file_rows)} SQL file rows → {UC_CAT}.{UC_SCHEMA}.job_details")
-    display(sql_files_df)
+    print(f"\n  Appended {len(obj_rows)} SQL object rows → {UC_CAT}.{UC_SCHEMA}.job_details")
+    display(pd.DataFrame(obj_rows).groupby(['job_type', 'categorization']).size()
+            .reset_index(name='objects'))
 
 print("\nfunctions")
 to_uc(fn_df if not fn_df.empty else pd.DataFrame(columns=['function_name', 'call_count', 'platform']), 'functions')
@@ -299,47 +310,51 @@ to_uc(sql_df, 'sql_statements')
 # DBTITLE 1,Phase 2a — SQL Analysis and Conversion
 conversion_rows, converted_code = [], {}
 
-import re as _re
-for path in sorted(input_root.rglob("*.sql")):   # rglob → also picks up subfolders
-    src = path.read_text(encoding="utf-8")
-    # Strip T-SQL `GO` batch separators — they are sqlcmd directives, not SQL statements,
-    # and make SqlglotEngine emit a None expression ('NoneType' object has no attribute 'copy').
-    src = _re.sub(r"(?im)^[ \t]*GO[ \t]*;?[ \t]*$", "", src)
-    out_path = output_root / f"converted_{path.name}"
+# One transpile attempt PER OBJECT (from sql_objects_list built in Phase 1), so
+# transpilability is reported per table/view/procedure — not "whole file failed
+# because one statement did". Keyed by object_id to join job_details.
+for o in sql_objects_list:
+    oid = o["object_id"]
     try:
         result = await engine.transpile(
             source_dialect="tsql", target_dialect="databricks",
-            source_code=src, file_path=path
+            source_code=o["source"], file_path=Path(o["source_file"]),
         )
-        out_path.write_text(result.transpiled_code, encoding="utf-8")
-        converted_code[path.name] = result.transpiled_code
         errors = result.error_list
+        converted_code[oid] = result.transpiled_code
         conversion_rows.append({
-            "file_name":           path.name,
-            "file_type":           "SQL",
-            "engine":              "sqlglot",
-            "model":               None,
-            "success_count":       result.success_count,
-            "error_count":         len(errors),
-            "transpiled":          len(errors) == 0,
-            "failure_reason":      "; ".join(str(e) for e in errors) if errors else None,
-            "output_file":         out_path.name,
+            "file_name":      oid,
+            "file_type":      o["object_type"],
+            "engine":         "sqlglot",
+            "model":          None,
+            "success_count":  result.success_count,
+            "error_count":    len(errors),
+            "transpiled":     len(errors) == 0,
+            "failure_reason": "; ".join(str(e) for e in errors) if errors else None,
+            "output_file":    None,
         })
     except Exception as e:
-        # A single unconvertible file must not abort the whole assessment — record and continue.
         msg = f"{type(e).__name__}: {str(e).splitlines()[0][:200]}"
-        print(f"  WARN {path.name}: transpile failed — {msg}")
         conversion_rows.append({
-            "file_name":           path.name,
-            "file_type":           "SQL",
-            "engine":              "sqlglot",
-            "model":               None,
-            "success_count":       0,
-            "error_count":         1,
-            "transpiled":          False,
-            "failure_reason":      msg,
-            "output_file":         None,
+            "file_name": oid, "file_type": o["object_type"], "engine": "sqlglot",
+            "model": None, "success_count": 0, "error_count": 1, "transpiled": False,
+            "failure_reason": msg, "output_file": None,
         })
+
+_ok = sum(r["transpiled"] for r in conversion_rows)
+print(f"  Transpiled {len(conversion_rows)} objects — {_ok} fully transpilable "
+      f"({_ok*100//max(len(conversion_rows),1)}%)")
+
+# Persist converted Databricks SQL to the Volume, one file per source file.
+_by_file = {}
+for o in sql_objects_list:
+    code = converted_code.get(o["object_id"])
+    if code:
+        _by_file.setdefault(o["source_file"], []).append(code)
+for src_file, blocks in _by_file.items():
+    (output_root / f"converted_{Path(src_file).stem}.sql").write_text(
+        "\n\n;\n\n".join(blocks), encoding="utf-8")
+print(f"  Wrote {len(_by_file)} converted SQL file(s) → {output_root}")
 
 # Note: SSIS package rows are written to conversion_results by Phase 2b (BladeBridge),
 # with their real transpilation outcomes — not pre-registered here.
@@ -399,16 +414,17 @@ spark.sql(f"""
 print(f"✓ {len(conversion_rows)} rows upserted → {target_table}")
 display(spark.table(target_table).orderBy("file_name"))
 
-# Show source → converted diff for the first file
+# Show source → converted diff for the first object
+_src_by_id = {o["object_id"]: o["source"] for o in sql_objects_list}
 first = list(converted_code)[0]
 print("=" * 80)
-print(f"SOURCE: {first}")
+print(f"SOURCE object: {first}")
 print("=" * 80)
-print((input_root / first).read_text(encoding="utf-8"))
+print(_src_by_id.get(first, "(source unavailable)")[:2000])
 print("\n" + "-" * 80)
 print("CONVERTED TO DATABRICKS SQL")
 print("-" * 80)
-print(converted_code[first])
+print(converted_code[first][:2000])
 
 # COMMAND ----------
 
