@@ -26,7 +26,8 @@ dbutils.library.restartPython()
 # MAGIC %md
 # MAGIC ## Lakebridge Demo: Folder-Driven SSIS & T-SQL Migration
 # MAGIC
-# MAGIC This notebook reads source assets from `sample_assets/` and produces converted outputs in `_output/` (git-ignored).
+# MAGIC This notebook reads source assets from `sample_assets/` (or a UC Volume set via `input_path`)
+# MAGIC and writes converted outputs to a UC Volume: `/Volumes/{catalog}/{schema}/assessment_output/`.
 # MAGIC
 # MAGIC **Everything runs inside this cluster** — Lakebridge and the BladeBridge transpiler are
 # MAGIC installed via `%pip` (cell 1). Nothing is installed on your laptop, so this works even when

@@ -40,22 +40,27 @@ lakebridge_demo/
 │   └── 07–10_ssis_*.dtsx             ← richer SSIS packages (loops, SCD2, DQ checks…)
 ├── Lakebridge Migration Assessment.lvdash.json  ← Dashboard source (template)
 ├── Lakebridge SSIS and TSQL Migration Demo.py   ← Main Databricks notebook
-├── dist/                             ← Generated parameterized dashboard — git-ignored
-└── _output/                          ← Generated conversion outputs — git-ignored
-    ├── converted/                    ← transpiled T-SQL (Phase 2a)
-    └── ssis_sdp/                     ← converted SSIS notebooks (Phase 2b, BladeBridge)
+├── scripts/clean_aps_sql.py          ← APS/PDW (.dsql) → T-SQL normalizer (Phase 0a)
+├── scripts/sql_objects.py            ← splits bulk SQL into per-object records
+└── dist/                             ← Generated parameterized dashboard — git-ignored
 ```
 
-The dashboard reads from **two Unity Catalog metric views** the notebook creates in Phase 3
-(`assessment_metrics`, `effort_metrics`) plus the small `effort_hypothesis` rate-card query —
-all KPIs are defined once in the metric views and reused via `MEASURE()`, so there are no
-duplicated analytic queries in the dashboard.
+Converted outputs are written to a **UC Volume**, not the repo:
+`/Volumes/{catalog}/{schema}/assessment_output/` — `converted/` (transpiled T-SQL,
+Phase 2a) and `ssis_sdp/` (converted SSIS notebooks, Phase 2b).
+
+The dashboard's datasets query the **base Delta tables** the notebook writes
+(`job_details`, `conversion_results`, `effort_hypothesis`, `overhead_hypothesis`),
+so it renders on any SQL warehouse version. The notebook also creates two UC metric
+views (`assessment_metrics`, `effort_metrics`) on a best-effort basis (they need a
+recent DBSQL runtime); the dashboard does not depend on them.
 
 ## Quick start (interactive)
 
 1. Open the notebook **Lakebridge SSIS and TSQL Migration Demo** in Databricks
 2. Run all cells top to bottom
-3. Review the inventory, analysis, and conversion outputs in `_output/`
+3. Review the inventory, analysis, and conversion outputs in the
+   `/Volumes/{catalog}/{schema}/assessment_output/` Volume
 
 ## Deploy (Declarative Automation Bundles)
 
