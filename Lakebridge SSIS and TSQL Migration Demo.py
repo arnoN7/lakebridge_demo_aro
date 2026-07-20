@@ -375,6 +375,22 @@ display(conversion_df)
 target_table = f"{UC_CAT}.{UC_SCHEMA}.conversion_results"
 _cols = ["file_name", "file_type", "engine", "model", "success_count",
          "error_count", "transpiled", "failure_reason", "transpilation_scope", "output_file"]
+
+# ── Schema reconcile — a conversion_results table left over from an OLDER run of
+# this notebook may predate the `model` / `output_file` columns. Reading such a
+# stale table via the metric views / dashboard (which project `model`) fails with
+# [INTERNAL_ERROR] Couldn't find model#… . Neither `CREATE TABLE IF NOT EXISTS`
+# nor the SSIS `MERGE … INSERT *` migrates schema, so add any missing columns here
+# before writing. (The overwrite branch below also replaces the schema, but this
+# guarantees correctness on the `else` branch and for the downstream MERGE too.)
+if spark.catalog.tableExists(target_table):
+    _existing = {f.name for f in spark.table(target_table).schema.fields}
+    _wanted   = {"model": "STRING", "output_file": "STRING"}
+    _missing  = [f"{c} {t}" for c, t in _wanted.items() if c not in _existing]
+    if _missing:
+        spark.sql(f"ALTER TABLE {target_table} ADD COLUMNS ({', '.join(_missing)})")
+        print(f"✓ Reconciled conversion_results schema — added: {', '.join(_missing)}")
+
 if conversion_rows:
     (spark.createDataFrame(conversion_df[_cols])
           .write.format("delta").mode("overwrite").option("overwriteSchema", "true")
