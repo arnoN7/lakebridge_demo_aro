@@ -373,34 +373,61 @@ display(conversion_df)
 # per-object SQL rows, so rows from a prior run keyed differently (e.g. old
 # file-level rows) never linger. Phase 2b (SSIS) MERGEs its package rows in after.
 target_table = f"{UC_CAT}.{UC_SCHEMA}.conversion_results"
-_cols = ["file_name", "file_type", "engine", "model", "success_count",
-         "error_count", "transpiled", "failure_reason", "transpilation_scope", "output_file"]
+
+# ── Explicit schema — CRITICAL. `model` / `output_file` are frequently all-NULL
+# (e.g. a T-SQL-only project with no Switch/LLM run). If we let Spark INFER the
+# schema from the pandas frame, an all-None column becomes VOID (NullType), which
+# Delta persists as a `void`-typed column. Any downstream read that projects it
+# (the metric views / dashboard `SELECT … c.model …`) then fails at plan time with
+# [INTERNAL_ERROR] Couldn't find model#… , because void columns are pruned from the
+# physical plan. Forcing STRING here keeps the column real regardless of content,
+# and `overwriteSchema=true` REPAIRS any table previously written with void columns.
+from pyspark.sql.types import (StructType, StructField, StringType,
+                               BooleanType, LongType)
+_cr_schema = StructType([
+    StructField("file_name", StringType()),
+    StructField("file_type", StringType()),
+    StructField("engine", StringType()),
+    StructField("model", StringType()),
+    StructField("success_count", LongType()),
+    StructField("error_count", LongType()),
+    StructField("transpiled", BooleanType()),
+    StructField("failure_reason", StringType()),
+    StructField("transpilation_scope", StringType()),
+    StructField("output_file", StringType()),
+])
 
 # ── Schema reconcile — a conversion_results table left over from an OLDER run of
-# this notebook may predate the `model` / `output_file` columns. Reading such a
-# stale table via the metric views / dashboard (which project `model`) fails with
-# [INTERNAL_ERROR] Couldn't find model#… . Neither `CREATE TABLE IF NOT EXISTS`
-# nor the SSIS `MERGE … INSERT *` migrates schema, so add any missing columns here
-# before writing. (The overwrite branch below also replaces the schema, but this
-# guarantees correctness on the `else` branch and for the downstream MERGE too.)
-if spark.catalog.tableExists(target_table):
-    _existing = {f.name for f in spark.table(target_table).schema.fields}
-    _wanted   = {"model": "STRING", "output_file": "STRING"}
-    _missing  = [f"{c} {t}" for c, t in _wanted.items() if c not in _existing]
-    if _missing:
-        spark.sql(f"ALTER TABLE {target_table} ADD COLUMNS ({', '.join(_missing)})")
-        print(f"✓ Reconciled conversion_results schema — added: {', '.join(_missing)}")
+# this notebook may predate the `model` / `output_file` columns, or hold them as
+# `void`. `CREATE TABLE IF NOT EXISTS` and the SSIS `MERGE … INSERT *` never migrate
+# schema, and `ALTER COLUMN` cannot change a void type — so if a void-typed column
+# exists we must fully replace the schema. When there are rows to write, the
+# overwrite branch below does that with the explicit schema. When there are none,
+# rebuild the empty table from the explicit schema so no void column can linger.
+def _has_void_col(tbl):
+    return any(str(f.dataType) in ("NullType()", "VoidType()")
+               for f in spark.table(tbl).schema.fields)
 
 if conversion_rows:
-    (spark.createDataFrame(conversion_df[_cols])
+    _rows = [(r.get("file_name"), r.get("file_type"), r.get("engine"), r.get("model"),
+              None if r.get("success_count") is None else int(r["success_count"]),
+              None if r.get("error_count")   is None else int(r["error_count"]),
+              None if r.get("transpiled")    is None else bool(r["transpiled"]),
+              r.get("failure_reason"), r.get("transpilation_scope"), r.get("output_file"))
+             for r in conversion_rows]
+    (spark.createDataFrame(_rows, _cr_schema)
           .write.format("delta").mode("overwrite").option("overwriteSchema", "true")
           .saveAsTable(target_table))
-    print(f"✓ {len(conversion_rows)} rows written (overwrite) → {target_table}")
+    print(f"✓ {len(conversion_rows)} rows written (overwrite, explicit schema) → {target_table}")
 else:
-    spark.sql(f"CREATE TABLE IF NOT EXISTS {target_table} ("
-              "file_name STRING, file_type STRING, engine STRING, model STRING, "
-              "success_count BIGINT, error_count BIGINT, transpiled BOOLEAN, "
-              "failure_reason STRING, transpilation_scope STRING, output_file STRING) USING DELTA")
+    # No rows: (re)create the table from the explicit schema. If a table already
+    # exists with a void `model`/`output_file`, drop-and-recreate to repair it.
+    if spark.catalog.tableExists(target_table) and _has_void_col(target_table):
+        spark.sql(f"DROP TABLE {target_table}")
+        print(f"✓ Dropped stale void-schema {target_table} — will recreate typed")
+    (spark.createDataFrame([], _cr_schema)
+          .write.format("delta").mode("overwrite").option("overwriteSchema", "true")
+          .saveAsTable(target_table))
 
 print(f"✓ {len(conversion_rows)} rows upserted → {target_table}")
 display(spark.table(target_table).orderBy("file_name"))
