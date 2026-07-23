@@ -98,7 +98,10 @@ input_root  = Path(_input_path) if _input_path else (REPO_ROOT / "sample_assets"
 
 # Outputs go to a UC Volume (never the repo / workspace files), so results live with
 # the data and survive redeploys. A dedicated `assessment_output` volume is created
-# under the target schema.
+# under the target schema. Ensure the target schema exists first — the DAB job deploys
+# to a pre-created schema, but an interactive/ad-hoc run against a new schema would
+# otherwise fail on the first write with [SCHEMA_NOT_FOUND].
+spark.sql(f"CREATE SCHEMA IF NOT EXISTS {UC_CAT}.{UC_SCHEMA}")
 spark.sql(f"CREATE VOLUME IF NOT EXISTS {UC_CAT}.{UC_SCHEMA}.assessment_output")
 _out_base   = Path(f"/Volumes/{UC_CAT}/{UC_SCHEMA}/assessment_output")
 output_root = _out_base / "converted"    # T-SQL conversions (Phase 2a)
