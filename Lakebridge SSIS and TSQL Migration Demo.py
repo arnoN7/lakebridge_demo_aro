@@ -138,6 +138,19 @@ if clean_aps_sql.is_pdw_source(input_root):
     print(f"  CREATE STATISTICS removed      : {s['stats']}")
     print(f"  CREATE INDEX removed           : {s['index']}")
     print(f"  varchar(-1) -> varchar(max)    : {s['vmax']}")
+    # clean_folder only rewrites .dsql/.sql — it does NOT carry over SSIS packages. Since
+    # downstream phases now read from cleaned_root, copy any .dtsx across too, otherwise
+    # Phase 2b globs the cleaned dir, finds 0 packages and skips SSIS even when the input
+    # volume has them (APS + SSIS mixed scope). Preserve subfolder layout to avoid collisions.
+    import shutil as _shutil
+    _dtsx = sorted(input_root.rglob("*.dtsx"))
+    for _p in _dtsx:
+        _rel = _p.relative_to(input_root)
+        _dest = cleaned_root / _rel
+        _dest.parent.mkdir(parents=True, exist_ok=True)
+        _shutil.copy2(_p, _dest)
+    if _dtsx:
+        print(f"  Carried over {len(_dtsx)} SSIS package(s) (.dtsx) to the cleaned source dir")
     input_root = cleaned_root      # all later phases read the cleaned source
     print(f"  Downstream phases will read cleaned source from: {input_root}")
 else:
